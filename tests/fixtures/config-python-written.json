@@ -1,0 +1,13 @@
+{
+  "human_id": "human-1",
+  "oauth": {
+    "access_token": "python-access-token",
+    "refresh_token": "python-refresh-token",
+    "expires_at": 4102444800.25,
+    "token_type": "Bearer",
+    "client_id": "python-client-id",
+    "client_secret": null,
+    "token_endpoint_auth_method": "none",
+    "redirect_uri": "http://127.0.0.1:53682/callback"
+  }
+}

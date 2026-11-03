@@ -1,0 +1,68 @@
+{
+  "POST /search": {
+    "query": "rust 2024 edition",
+    "follow_up_questions": null,
+    "answer": "The Rust 2024 edition shipped with Rust 1.85.",
+    "images": ["https://example.com/rust-logo.png"],
+    "results": [
+      {
+        "url": "https://example.com/rust-2024",
+        "title": "Rust 2024 edition",
+        "content": "The Rust 2024 edition is the largest edition yet. It changes how impl Trait captures lifetimes, reserves the gen keyword, and makes unsafe extern blocks explicit.",
+        "score": 0.91,
+        "raw_content": null
+      },
+      {
+        "url": "https://blog.example.org/editions",
+        "title": "Editions explained",
+        "content": "Editions let Rust evolve without breaking existing code.",
+        "score": 0.72,
+        "raw_content": null
+      }
+    ],
+    "response_time": 1.23,
+    "request_id": "req-search-1"
+  },
+  "POST /extract": {
+    "results": [
+      {
+        "url": "https://example.com/rust-2024",
+        "raw_content": "# Rust 2024\n\nThe Rust 2024 edition is the largest edition yet.\n\n\n\nIt reserves the gen keyword.",
+        "images": []
+      }
+    ],
+    "failed_results": [{ "url": "https://broken.example.com/", "error": "Failed to fetch url" }],
+    "response_time": 0.87,
+    "request_id": "req-extract-1"
+  },
+  "POST /crawl": {
+    "base_url": "https://docs.example.com",
+    "results": [
+      { "url": "https://docs.example.com/", "raw_content": "Welcome to the docs.\nStart here." },
+      { "url": "https://docs.example.com/install", "raw_content": "Install with npm i -g @tavily/cli." }
+    ],
+    "response_time": 2.46,
+    "request_id": "req-crawl-1"
+  },
+  "POST /map": {
+    "base_url": "https://docs.example.com",
+    "results": [
+      "https://docs.example.com/",
+      "https://docs.example.com/install",
+      "https://docs.example.com/usage"
+    ],
+    "response_time": 0.53,
+    "request_id": "req-map-1"
+  },
+  "GET /research/*": {
+    "request_id": "res-123",
+    "created_at": "2026-11-02T10:00:00Z",
+    "status": "completed",
+    "content": "# Rust 2024\n\nThe 2024 edition shipped in February 2025 [1].",
+    "sources": [
+      { "title": "Announcing Rust 1.85", "url": "https://blog.rust-lang.org/2025/02/20/Rust-1.85.0.html", "favicon": null }
+    ],
+    "response_time": 12.34
+  },
+  "GET /@tavily/cli/latest": { "name": "@tavily/cli", "version": "9.9.9" }
+}

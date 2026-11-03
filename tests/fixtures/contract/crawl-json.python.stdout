@@ -1,0 +1,15 @@
+{
+  "base_url": "https://docs.example.com",
+  "results": [
+    {
+      "url": "https://docs.example.com/",
+      "raw_content": "Welcome to the docs.\nStart here."
+    },
+    {
+      "url": "https://docs.example.com/install",
+      "raw_content": "Install with npm i -g @tavily/cli."
+    }
+  ],
+  "response_time": 2.46,
+  "request_id": "req-crawl-1"
+}

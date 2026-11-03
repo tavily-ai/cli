@@ -1,0 +1,303 @@
+import { spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, test } from "vitest";
+
+const INSTALL_SCRIPT = path.resolve(import.meta.dirname, "..", "install.sh");
+const HAS_SCRIPT_CMD = process.platform !== "win32";
+
+const tempDirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+interface Sandbox {
+  bin: string;
+  env: Record<string, string>;
+  calls: () => string[];
+}
+
+function writeBin(box: Sandbox, name: string, body: string): void {
+  const file = path.join(box.bin, name);
+  writeFileSync(file, `#!/bin/sh\n${body}\n`);
+  chmodSync(file, 0o755);
+}
+
+/** A fake that logs its argv, then runs `body` for canned output and exit codes. */
+function writeLogged(box: Sandbox, name: string, body = "exit 0"): void {
+  writeBin(box, name, `printf '${name} %s\\n' "$*" >> "$TVLY_INSTALL_TEST_LOG"\n${body}`);
+}
+
+interface Options {
+  node?: string | null;
+  initExit?: number;
+  managers?: string[];
+  owner?: string | null;
+  listOutput?: string;
+  installExit?: number;
+  tvlyVersion?: string;
+}
+
+function sandbox(options: Options = {}): Sandbox {
+  const {
+    node = "22.3.0",
+    initExit = 0,
+    managers = ["npm"],
+    owner = null,
+    listOutput,
+    installExit = 0,
+    tvlyVersion = "0.3.0",
+  } = options;
+  const dir = mkdtempSync(path.join(tmpdir(), "tvly-install-"));
+  tempDirs.push(dir);
+  const bin = path.join(dir, "bin");
+  mkdirSync(bin);
+  const log = path.join(dir, "calls.log");
+  const box: Sandbox = {
+    bin,
+    env: {
+      ...(process.env as Record<string, string>),
+      PATH: `${bin}:/usr/bin:/bin`,
+      HOME: dir,
+      TVLY_INSTALL_TEST_LOG: log,
+      TVLY_INIT_EXIT: String(initExit),
+      CI: "",
+      SSH_CONNECTION: "",
+      SSH_TTY: "",
+    },
+    calls: () => {
+      try {
+        return readFileSync(log, "utf8").split("\n").filter(Boolean);
+      } catch {
+        return [];
+      }
+    },
+  };
+  if (node !== null) writeBin(box, "node", `printf '${node}\\n'`);
+  for (const manager of managers) {
+    // Only the owning manager reports the package from its list command.
+    const report =
+      manager === owner
+        ? 'printf "@tavily/cli@0.3.0\\n"'
+        : listOutput
+          ? `printf "${listOutput}\\n"`
+          : ":";
+    writeLogged(
+      box,
+      manager,
+      `case "$*" in "ls "*|"list "*|"pm ls"*|"global list"*) ${report} ;; esac\ncase "$*" in *install*|*" add "*) exit ${installExit} ;; esac\nexit 0`,
+    );
+  }
+  writeLogged(
+    box,
+    "tvly",
+    `if [ "$1" = "--version" ]; then printf 'tavily-cli ${tvlyVersion}\\n'; exit 0; fi
+if [ "$1" = "init" ] && [ "$2" != "--help" ]; then exit "$TVLY_INIT_EXIT"; fi
+exit 0`,
+  );
+  return box;
+}
+
+function runPlain(box: Sandbox) {
+  const result = spawnSync("sh", [INSTALL_SCRIPT], { env: box.env, encoding: "utf8" });
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+}
+
+/** Run under a pseudo terminal via script(1); BSD and util-linux differ in flags. */
+function runWithTerminal(box: Sandbox, pipeScript = false) {
+  const inner = pipeScript
+    ? ["sh", "-c", 'cat "$1" | sh', "sh", INSTALL_SCRIPT]
+    : ["sh", INSTALL_SCRIPT];
+  const args =
+    process.platform === "darwin"
+      ? ["-q", "/dev/null", ...inner]
+      : ["-qec", inner.map((part) => `'${part}'`).join(" "), "/dev/null"];
+  const result = spawnSync("script", args, {
+    env: { ...box.env, DISPLAY: ":0" },
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf8",
+  });
+  return { status: result.status, output: result.stdout };
+}
+
+const FRESH_NPM_CALLS = [
+  "npm ls -g --depth=0 @tavily/cli",
+  "npm install -g @tavily/cli",
+  "tvly --version",
+  "npm ls -g --depth=0 @tavily/cli",
+];
+
+describe("install.sh", () => {
+  test("test_noninteractive_install_prints_init_without_running_it", () => {
+    const box = sandbox();
+    const result = runPlain(box);
+
+    expect(result.status).toBe(0);
+    expect(box.calls()).toEqual(FRESH_NPM_CALLS);
+    expect(result.stdout).toContain("Success! tavily-cli 0.3.0 is installed.");
+    expect(result.stdout).not.toContain("tavily-cli tavily-cli");
+    expect(result.stdout).toContain("tvly init");
+  });
+
+  describe.skipIf(!HAS_SCRIPT_CMD)("with a terminal", () => {
+    test("test_fresh_interactive_install_hands_off_to_init", () => {
+      const box = sandbox();
+      const { status, output } = runWithTerminal(box, true);
+
+      expect(status).toBe(0);
+      expect(box.calls()).toEqual([...FRESH_NPM_CALLS, "tvly init --help", "tvly init"]);
+      expect(output).toContain("Starting guided Tavily setup");
+      expect(output).not.toContain("guided authentication and skill setup");
+    });
+
+    test("test_init_failure_does_not_fail_successful_install", () => {
+      const box = sandbox({ initExit: 3 });
+      const { status, output } = runWithTerminal(box);
+
+      expect(status).toBe(0);
+      expect(output).toContain("Guided setup did not complete");
+      expect(output).toContain("tvly init");
+    });
+
+    test("an upgrade of an existing install does not run init", () => {
+      const box = sandbox({ owner: "npm" });
+      const { status, output } = runWithTerminal(box);
+
+      expect(status).toBe(0);
+      expect(box.calls()).toEqual([
+        "npm ls -g --depth=0 @tavily/cli",
+        "npm install -g @tavily/cli@latest",
+        "tvly --version",
+        "npm ls -g --depth=0 @tavily/cli",
+      ]);
+      expect(output).not.toContain("Starting guided Tavily setup");
+    });
+
+    test.each(["CI", "SSH_CONNECTION", "SSH_TTY"])(
+      "test_automation_and_remote_sessions_do_not_run_init (%s)",
+      (variable) => {
+        const box = sandbox();
+        box.env[variable] = "set";
+        const { status, output } = runWithTerminal(box);
+
+        expect(status).toBe(0);
+        expect(box.calls()).toEqual(FRESH_NPM_CALLS);
+        expect(output).not.toContain("Starting guided Tavily setup");
+        expect(output).toContain("tvly init");
+      },
+    );
+  });
+
+  test("existing npm install upgrades with npm install -g @tavily/cli@latest", () => {
+    const box = sandbox({ owner: "npm" });
+    const result = runPlain(box);
+
+    expect(result.status).toBe(0);
+    expect(box.calls()).toEqual([
+      "npm ls -g --depth=0 @tavily/cli",
+      "npm install -g @tavily/cli@latest",
+      "tvly --version",
+      "npm ls -g --depth=0 @tavily/cli",
+    ]);
+    expect(result.stdout).not.toContain("shadowing");
+  });
+
+  test("an older tvly earlier on PATH is reported as shadowing the npm install", () => {
+    const box = sandbox({ owner: "npm", tvlyVersion: "0.2.1" });
+    const result = runPlain(box);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(
+      "warning: 'tvly --version' reports 0.2.1, but @tavily/cli 0.3.0 was just installed.",
+    );
+    expect(result.stdout).toContain(`An older tvly earlier on PATH (${box.bin}/tvly) is shadowing`);
+    expect(result.stdout).toContain("uv tool uninstall tavily-cli");
+    expect(result.stdout).toContain("pipx uninstall tavily-cli");
+  });
+
+  test("a failed fresh install exits non-zero and never runs init", () => {
+    const box = sandbox({ installExit: 1 });
+    const result = runPlain(box);
+
+    expect(result.status).not.toBe(0);
+    expect(box.calls()).toEqual(["npm ls -g --depth=0 @tavily/cli", "npm install -g @tavily/cli"]);
+  });
+
+  test("existing pnpm install wins over available npm", () => {
+    const box = sandbox({ managers: ["npm", "pnpm"], owner: "pnpm" });
+    const result = runPlain(box);
+
+    expect(result.status).toBe(0);
+    const calls = box.calls();
+    expect(calls).toContain("pnpm add -g @tavily/cli@latest");
+    expect(calls.some((call) => call.startsWith("npm install"))).toBe(false);
+  });
+
+  test("existing yarn install upgrades via yarn global add", () => {
+    const box = sandbox({ managers: ["yarn"], owner: "yarn" });
+    const result = runPlain(box);
+
+    expect(result.status).toBe(0);
+    expect(box.calls()).toEqual([
+      "yarn global list",
+      "yarn global add @tavily/cli@latest",
+      "tvly --version",
+      "yarn global list",
+    ]);
+  });
+
+  test("a sibling package name does not count as an existing install", () => {
+    const box = sandbox({
+      managers: ["yarn"],
+      listOutput: 'info \\"@tavily/cli-extras@1.0.0\\" has binaries',
+    });
+    const result = runPlain(box);
+
+    expect(result.status).toBe(0);
+    expect(box.calls()).toEqual([
+      "yarn global list",
+      "yarn global add @tavily/cli",
+      "tvly --version",
+      "yarn global list",
+    ]);
+  });
+
+  test("fresh install uses the first manager on PATH", () => {
+    const box = sandbox({ managers: ["bun"] });
+    const result = runPlain(box);
+
+    expect(result.status).toBe(0);
+    expect(box.calls()).toEqual([
+      "bun pm ls -g",
+      "bun add -g @tavily/cli",
+      "tvly --version",
+      "bun pm ls -g",
+    ]);
+  });
+
+  test("no node prints the nodejs.org link and exits 1", () => {
+    const box = sandbox({ node: null });
+    const result = runPlain(box);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("error: Node.js 20.1+ is required but not found.");
+    expect(result.stderr).toContain("https://nodejs.org/");
+    expect(box.calls()).toEqual([]);
+  });
+
+  test("node 18 prints a version error and exits 1", () => {
+    const box = sandbox({ node: "18.19.0" });
+    const result = runPlain(box);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Node.js 20.1+ is required");
+    expect(box.calls()).toEqual([]);
+  });
+
+  test("node 20.0 is rejected and 20.1 accepted", () => {
+    expect(runPlain(sandbox({ node: "20.0.0" })).status).toBe(1);
+    expect(runPlain(sandbox({ node: "20.1.0" })).status).toBe(0);
+  });
+});

@@ -1,0 +1,1 @@
+{"auth": {"authenticated": true, "method": "api_key"}, "mode": "authenticated", "ok": true, "skills": {"agents": [], "restart_required": false, "skipped": true, "source": "tavily-ai/skills"}, "verification": {"auth": true, "cli": true, "live_search": true}, "version": "0.2.1"}

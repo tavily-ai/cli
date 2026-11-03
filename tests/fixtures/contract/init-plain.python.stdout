@@ -1,0 +1,11 @@
+
+  > Tavily is ready
+    ✓ Authenticated via api_key
+    • Skills skipped
+    ✓ Live search verified
+
+  Try:
+    tvly search "latest AI news"
+    tvly extract https://example.com
+    tvly research "your topic"
+

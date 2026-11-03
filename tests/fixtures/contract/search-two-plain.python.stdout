@@ -1,0 +1,24 @@
+=== [1/2] rust 2024 edition
+Answer: The Rust 2024 edition shipped with Rust 1.85.
+
+1. Rust 2024 edition
+https://example.com/rust-2024
+The Rust 2024 edition is the largest edition yet. It changes how impl Trait captures lifetimes, reserves the gen keyword, and makes unsafe extern blocks explicit.
+
+2. Editions explained
+https://blog.example.org/editions
+Editions let Rust evolve without breaking existing code.
+
+Image: https://example.com/rust-logo.png
+=== [2/2] rust 2024 edition
+Answer: The Rust 2024 edition shipped with Rust 1.85.
+
+1. Rust 2024 edition
+https://example.com/rust-2024
+The Rust 2024 edition is the largest edition yet. It changes how impl Trait captures lifetimes, reserves the gen keyword, and makes unsafe extern blocks explicit.
+
+2. Editions explained
+https://blog.example.org/editions
+Editions let Rust evolve without breaking existing code.
+
+Image: https://example.com/rust-logo.png

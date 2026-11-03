@@ -1,0 +1,9 @@
+{
+  "base_url": "https://a.example",
+  "results": [
+    { "url": "https://a.example/docs/intro/", "raw_content": "\n# Intro\nBody of the intro." },
+    { "url": "https://a.example/", "raw_content": "Home page text" },
+    { "url": "https://a.example/empty", "raw_content": "" }
+  ],
+  "response_time": 1.5
+}

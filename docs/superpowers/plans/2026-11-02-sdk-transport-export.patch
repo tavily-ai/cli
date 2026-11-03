@@ -1,0 +1,1523 @@
+From fcabf20f4fc98c49ae72e6a7addc1b91b37ea605 Mon Sep 17 00:00:00 2001
+From: Guy Hartstein <guyh2020@gmail.com>
+Date: Tue, 3 Nov 2026 11:34:41 -0500
+Subject: [PATCH 1/3] feat: export transport and typed request errors
+
+Add createTransport (post/get/stream returning raw bodies) and
+TavilyRequestError (status, body, docs). Typed client methods now use the
+transport, leaving one header builder and one error path.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ CHANGELOG.md             |  17 ++++
+ package.json             |   4 +-
+ src/client.ts            |  30 +------
+ src/crawl.ts             |  94 +++++++++------------
+ src/errors.ts            |  25 ++++++
+ src/extract.ts           |  90 +++++++++------------
+ src/feedback.ts          |  76 +++++++----------
+ src/index.ts             |   4 +-
+ src/map.ts               |  70 +++++++---------
+ src/research.ts          | 141 +++++++-------------------------
+ src/search.ts            | 130 +++++++++++++----------------
+ src/transport.ts         | 160 ++++++++++++++++++++++++++++++++++++
+ src/utils.ts             |  92 ++++-----------------
+ tests/transport.test.mjs | 171 +++++++++++++++++++++++++++++++++++++++
+ 14 files changed, 616 insertions(+), 488 deletions(-)
+ create mode 100644 src/transport.ts
+ create mode 100644 tests/transport.test.mjs
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 90e9f03..a5b35a3 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,22 @@
+ # Changelog
+ 
++## 1.1.0
++
++### Added
++
++- `createTransport(options)` and the `TavilyTransport` type: authenticated `post`, `get`, and
++  `stream` calls that resolve with the raw, untouched response body. Handles credentials,
++  keyless mode, identity headers, proxies, base URL, and timeouts. The typed client methods now
++  use it.
++- `TavilyRequestError`, thrown for non-2xx responses, with `status`, `body`, and `docs`
++  (the `documentation` URL from the response, when present).
++
++### Changed
++
++- A keyless-limit response received in keyed mode now throws `TavilyRequestError` instead of
++  `TavilyKeylessLimitError`, which is thrown only in keyless mode.
++- Streaming research errors now carry the parsed error body instead of an unread stream.
++
+ ## 1.0.0 (unreleased)
+ 
+ ### Added
+diff --git a/package.json b/package.json
+index e59cf01..69dd378 100644
+--- a/package.json
++++ b/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@tavily/core",
+-  "version": "1.0.0",
++  "version": "1.1.0",
+   "description": "Official JavaScript library for Tavily.",
+   "main": "./dist/index.js",
+   "module": "./dist/index.mjs",
+@@ -53,7 +53,7 @@
+   },
+   "scripts": {
+     "build": "tsup",
+-    "test": "npm run build && node --test tests/search.test.mjs",
++    "test": "npm run build && node --test tests/search.test.mjs tests/transport.test.mjs",
+     "test:package": "npm run build && node --test tests/package.test.mjs",
+     "prepublishOnly": "npm run build"
+   },
+diff --git a/src/client.ts b/src/client.ts
+index 4597218..d054b7d 100644
+--- a/src/client.ts
++++ b/src/client.ts
+@@ -1,4 +1,5 @@
+-import { TavilyClientOptions, TavilyClient, TavilyProxyOptions, TavilyRequestConfig } from "./types";
++import { TavilyClientOptions, TavilyClient } from "./types";
++import { resolveRequestConfig } from "./transport";
+ import { _search } from "./search";
+ import { _extract } from "./extract";
+ import { _crawl } from "./crawl";
+@@ -15,32 +16,9 @@ function makeKeylessUnsupported(methodName: string): (...args: any[]) => never {
+ }
+ 
+ export function tavily(options?: TavilyClientOptions): TavilyClient {
+-  const apiKey = options?.apiKey || process.env.TAVILY_API_KEY;
+-  const proxies = (() => {
+-    const http = options?.proxies?.http || process.env.TAVILY_HTTP_PROXY;
+-    const https = options?.proxies?.https || process.env.TAVILY_HTTPS_PROXY;
++  const requestConfig = resolveRequestConfig(options);
+ 
+-    const result = {} as TavilyProxyOptions;
+-
+-    if (http) result.http = http;
+-    if (https) result.https = https;
+-
+-    return Object.keys(result).length > 0 ? result : undefined;
+-  })();
+-
+-  const requestConfig: TavilyRequestConfig = {
+-    ...(apiKey ? { apiKey } : {}),
+-    proxies,
+-    apiBaseURL: options?.apiBaseURL,
+-    clientSource: options?.clientSource,
+-    projectId: options?.projectId || process.env.TAVILY_PROJECT,
+-    orgId: options?.orgId || process.env.TAVILY_ORG_ID,
+-    sessionId: options?.sessionId,
+-    humanId: options?.humanId,
+-    clientName: options?.clientName,
+-  };
+-
+-  if (!apiKey) {
++  if (!requestConfig.apiKey) {
+     return {
+       search: _search(requestConfig),
+       extract: _extract(requestConfig),
+diff --git a/src/crawl.ts b/src/crawl.ts
+index 704530e..6e07439 100644
+--- a/src/crawl.ts
++++ b/src/crawl.ts
+@@ -3,8 +3,7 @@ import {
+   TavilyCrawlFunction,
+   TavilyRequestConfig,
+ } from "./types";
+-import { post, handleRequestError, handleTimeoutError } from "./utils";
+-import { AxiosError, AxiosResponse } from "axios";
++import { createTransport } from "./transport";
+ 
+ export function _crawl(requestConfig: TavilyRequestConfig): TavilyCrawlFunction {
+   return async function crawl(
+@@ -42,59 +41,44 @@ export function _crawl(requestConfig: TavilyRequestConfig): TavilyCrawlFunction
+       ...(clientName !== undefined && { clientName }),
+     };
+ 
+-    try {
+-      const response = await post(
+-        "crawl",
+-        {
+-          url: url,
+-          max_depth: maxDepth,
+-          max_breadth: maxBreadth,
+-          limit,
+-          extract_depth: extractDepth,
+-          select_paths: selectPaths,
+-          select_domains: selectDomains,
+-          exclude_paths: excludePaths,
+-          exclude_domains: excludeDomains,
+-          allow_external: allowExternal,
+-          include_images: includeImages,
+-          instructions,
+-          format,
+-          timeout,
+-          include_favicon: includeFavicon,
+-          include_usage: includeUsage,
+-          chunks_per_source: chunksPerSource,
+-          ...kwargs,
+-        },
+-        callConfig,
+-        requestTimeout
+-      );
++    const data: any = await createTransport(callConfig).post(
++      "crawl",
++      {
++        url: url,
++        max_depth: maxDepth,
++        max_breadth: maxBreadth,
++        limit,
++        extract_depth: extractDepth,
++        select_paths: selectPaths,
++        select_domains: selectDomains,
++        exclude_paths: excludePaths,
++        exclude_domains: excludeDomains,
++        allow_external: allowExternal,
++        include_images: includeImages,
++        instructions,
++        format,
++        timeout,
++        include_favicon: includeFavicon,
++        include_usage: includeUsage,
++        chunks_per_source: chunksPerSource,
++        ...kwargs,
++      },
++      { timeoutSeconds: requestTimeout }
++    );
+ 
+-      return {
+-        responseTime: response.data.response_time,
+-        baseUrl: response.data.base_url,
+-        results: response.data.results.map((item: any) => {
+-          return {
+-            url: item.url,
+-            rawContent: item.raw_content,
+-            images: item.images,
+-            favicon: item.favicon,
+-          };
+-        }),
+-        requestId: response.data.request_id,
+-        ...(response.data.usage !== undefined && { usage: response.data.usage }),
+-      };
+-    } catch (err) {
+-      if (err instanceof AxiosError) {
+-        if (err.code === "ECONNABORTED") {
+-          handleTimeoutError(requestTimeout);
+-        }
+-        if (err.response) {
+-          handleRequestError(err.response as AxiosResponse);
+-        }
+-      }
+-      throw new Error(
+-        `An unexpected error occurred while making the request. Error: ${err}`
+-      );
+-    }
++    return {
++      responseTime: data.response_time,
++      baseUrl: data.base_url,
++      results: data.results.map((item: any) => {
++        return {
++          url: item.url,
++          rawContent: item.raw_content,
++          images: item.images,
++          favicon: item.favicon,
++        };
++      }),
++      requestId: data.request_id,
++      ...(data.usage !== undefined && { usage: data.usage }),
++    };
+   };
+ }
+diff --git a/src/errors.ts b/src/errors.ts
+index 45854b0..d781ece 100644
+--- a/src/errors.ts
++++ b/src/errors.ts
+@@ -86,3 +86,28 @@ export function keylessLimitErrorFromEnvelope(
+     continuationPaths: nextActions,
+   });
+ }
++
++/**
++ * Thrown for any non-2xx Tavily API response other than a keyless-limit
++ * envelope in keyless mode. Carries the HTTP status and the parsed body.
++ */
++export class TavilyRequestError extends Error {
++  public readonly status: number;
++  public readonly body: unknown;
++  public readonly docs?: string;
++
++  constructor(params: {
++    message: string;
++    status: number;
++    body: unknown;
++    docs?: string;
++  }) {
++    super(params.message);
++    this.name = "TavilyRequestError";
++    this.status = params.status;
++    this.body = params.body;
++    this.docs = params.docs;
++
++    Object.setPrototypeOf(this, TavilyRequestError.prototype);
++  }
++}
+diff --git a/src/extract.ts b/src/extract.ts
+index 6e7d8aa..f1898ae 100644
+--- a/src/extract.ts
++++ b/src/extract.ts
+@@ -1,10 +1,9 @@
+-import { AxiosError, AxiosResponse } from "axios";
+ import {
+   TavilyExtractOptions,
+   TavilyExtractFunction,
+   TavilyRequestConfig,
+ } from "./types";
+-import { handleRequestError, handleTimeoutError, post } from "./utils";
++import { createTransport } from "./transport";
+ 
+ export function _extract(requestConfig: TavilyRequestConfig): TavilyExtractFunction {
+   return async function extract(
+@@ -21,57 +20,42 @@ export function _extract(requestConfig: TavilyRequestConfig): TavilyExtractFunct
+       ...(clientName !== undefined && { clientName }),
+     };
+ 
+-    try {
+-      const response = await post(
+-        "extract",
+-        {
+-          urls,
+-          include_images: includeImages,
+-          extract_depth: extractDepth,
+-          format,
+-          include_favicon: includeFavicon,
+-          timeout, // Add timeout to the payload
+-          include_usage: includeUsage,
+-          query,
+-          chunks_per_source: chunksPerSource,
+-          ...kwargs,
+-        },
+-        callConfig,
+-        requestTimeout
+-      );
++    const data: any = await createTransport(callConfig).post(
++      "extract",
++      {
++        urls,
++        include_images: includeImages,
++        extract_depth: extractDepth,
++        format,
++        include_favicon: includeFavicon,
++        timeout, // Add timeout to the payload
++        include_usage: includeUsage,
++        query,
++        chunks_per_source: chunksPerSource,
++        ...kwargs,
++      },
++      { timeoutSeconds: requestTimeout }
++    );
+ 
+-      return {
+-        responseTime: response.data.response_time,
+-        results: response.data.results.map((result: any) => {
+-          return {
+-            url: result.url,
+-            title: result.title,
+-            rawContent: result.raw_content,
+-            images: result.images,
+-            favicon: result.favicon,
+-          };
+-        }),
+-        failedResults: response.data.failed_results.map((result: any) => {
+-          return {
+-            url: result.url,
+-            error: result.error,
+-          };
+-        }),
+-        requestId: response.data.request_id,
+-        ...(response.data.usage !== undefined && { usage: response.data.usage }),
+-      };
+-    } catch (err) {
+-      if (err instanceof AxiosError) {
+-        if (err.code === "ECONNABORTED") {
+-          handleTimeoutError(requestTimeout);
+-        }
+-        if (err.response) {
+-          handleRequestError(err.response as AxiosResponse);
+-        }
+-      }
+-      throw new Error(
+-        `An unexpected error occurred while making the request. Error: ${err}`
+-      );
+-    }
++    return {
++      responseTime: data.response_time,
++      results: data.results.map((result: any) => {
++        return {
++          url: result.url,
++          title: result.title,
++          rawContent: result.raw_content,
++          images: result.images,
++          favicon: result.favicon,
++        };
++      }),
++      failedResults: data.failed_results.map((result: any) => {
++        return {
++          url: result.url,
++          error: result.error,
++        };
++      }),
++      requestId: data.request_id,
++      ...(data.usage !== undefined && { usage: data.usage }),
++    };
+   };
+ }
+diff --git a/src/feedback.ts b/src/feedback.ts
+index ac81389..6645833 100644
+--- a/src/feedback.ts
++++ b/src/feedback.ts
+@@ -3,8 +3,7 @@ import {
+   TavilyFeedbackFunction,
+   TavilyRequestConfig,
+ } from "./types";
+-import { post, handleRequestError, handleTimeoutError } from "./utils";
+-import { AxiosError, AxiosResponse } from "axios";
++import { createTransport } from "./transport";
+ 
+ export function _feedback(requestConfig: TavilyRequestConfig): TavilyFeedbackFunction {
+   return async function feedback(options: TavilyFeedbackOptions) {
+@@ -36,50 +35,35 @@ export function _feedback(requestConfig: TavilyRequestConfig): TavilyFeedbackFun
+       ...(clientName !== undefined && { clientName }),
+     };
+ 
+-    try {
+-      const response = await post(
+-        "feedback",
+-        {
+-          session_id: sessionId,
+-          request_id: requestId,
+-          agent_score: agentScore,
+-          human_score: humanScore,
+-          extra_scores: extraScores?.map((s) => ({ label: s.label, value: s.value })),
+-          comment,
+-          response_delivered: responseDelivered,
+-          used_urls: usedUrls,
+-          used_ids: usedIds,
+-          used_citations: usedCitations,
+-          urls_scores: urlsScores?.map((s) => ({
+-            id: s.id,
+-            url: s.url,
+-            agent_score: s.agentScore,
+-            scores: s.scores?.map((sc) => ({ label: sc.label, value: sc.value })),
+-            comment: s.comment,
+-          })),
+-          ...kwargs,
+-        },
+-        callConfig,
+-        requestTimeout
+-      );
++    const data: any = await createTransport(callConfig).post(
++      "feedback",
++      {
++        session_id: sessionId,
++        request_id: requestId,
++        agent_score: agentScore,
++        human_score: humanScore,
++        extra_scores: extraScores?.map((s) => ({ label: s.label, value: s.value })),
++        comment,
++        response_delivered: responseDelivered,
++        used_urls: usedUrls,
++        used_ids: usedIds,
++        used_citations: usedCitations,
++        urls_scores: urlsScores?.map((s) => ({
++          id: s.id,
++          url: s.url,
++          agent_score: s.agentScore,
++          scores: s.scores?.map((sc) => ({ label: sc.label, value: sc.value })),
++          comment: s.comment,
++        })),
++        ...kwargs,
++      },
++      { timeoutSeconds: requestTimeout }
++    );
+ 
+-      return {
+-        success: response.data.success,
+-        feedbackId: response.data.feedback_id,
+-        responseTime: response.data.response_time,
+-      };
+-    } catch (err) {
+-      if (err instanceof AxiosError) {
+-        if (err.code === "ECONNABORTED") {
+-          handleTimeoutError(requestTimeout);
+-        }
+-        if (err.response) {
+-          handleRequestError(err.response as AxiosResponse);
+-        }
+-      }
+-      throw new Error(
+-        `An unexpected error occurred while making the request. Error: ${err}`
+-      );
+-    }
++    return {
++      success: data.success,
++      feedbackId: data.feedback_id,
++      responseTime: data.response_time,
++    };
+   };
+ }
+diff --git a/src/index.ts b/src/index.ts
+index 9923221..4717764 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -1,3 +1,5 @@
+ export * from './client';
+ export * from './types';
+-export * from './errors';
+\ No newline at end of file
++export * from './errors';
++export { createTransport } from './transport';
++export type { TavilyTransport } from './transport';
+diff --git a/src/map.ts b/src/map.ts
+index 6845aea..77a19ed 100644
+--- a/src/map.ts
++++ b/src/map.ts
+@@ -3,8 +3,7 @@ import {
+   TavilyMapFunction,
+   TavilyRequestConfig,
+ } from "./types";
+-import { post, handleRequestError, handleTimeoutError } from "./utils";
+-import { AxiosError, AxiosResponse } from "axios";
++import { createTransport } from "./transport";
+ 
+ export function _map(requestConfig: TavilyRequestConfig): TavilyMapFunction {
+   return async function map(
+@@ -37,47 +36,32 @@ export function _map(requestConfig: TavilyRequestConfig): TavilyMapFunction {
+       ...(clientName !== undefined && { clientName }),
+     };
+ 
+-    try {
+-      const response = await post(
+-        "map",
+-        {
+-          url: url,
+-          max_depth: maxDepth,
+-          max_breadth: maxBreadth,
+-          limit,
+-          select_paths: selectPaths,
+-          select_domains: selectDomains,
+-          exclude_paths: excludePaths,
+-          exclude_domains: excludeDomains,
+-          allow_external: allowExternal,
+-          instructions,
+-          timeout,
+-          include_usage: includeUsage,
+-          ...kwargs,
+-        },
+-        callConfig,
+-        requestTimeout
+-      );
++    const data: any = await createTransport(callConfig).post(
++      "map",
++      {
++        url: url,
++        max_depth: maxDepth,
++        max_breadth: maxBreadth,
++        limit,
++        select_paths: selectPaths,
++        select_domains: selectDomains,
++        exclude_paths: excludePaths,
++        exclude_domains: excludeDomains,
++        allow_external: allowExternal,
++        instructions,
++        timeout,
++        include_usage: includeUsage,
++        ...kwargs,
++      },
++      { timeoutSeconds: requestTimeout }
++    );
+ 
+-      return {
+-        responseTime: response.data.response_time,
+-        baseUrl: response.data.base_url,
+-        results: response.data.results,
+-        requestId: response.data.request_id,
+-        ...(response.data.usage !== undefined && { usage: response.data.usage }),
+-      };
+-    } catch (err) {
+-      if (err instanceof AxiosError) {
+-        if (err.code === "ECONNABORTED") {
+-          handleTimeoutError(requestTimeout);
+-        }
+-        if (err.response) {
+-          handleRequestError(err.response as AxiosResponse);
+-        }
+-      }
+-      throw new Error(
+-        `An unexpected error occurred while making the request. Error: ${err}`
+-      );
+-    }
++    return {
++      responseTime: data.response_time,
++      baseUrl: data.base_url,
++      results: data.results,
++      requestId: data.request_id,
++      ...(data.usage !== undefined && { usage: data.usage }),
++    };
+   };
+ }
+diff --git a/src/research.ts b/src/research.ts
+index 0b7fd13..0042ed3 100644
+--- a/src/research.ts
++++ b/src/research.ts
+@@ -7,9 +7,7 @@ import {
+   TavilyGetResearchIncompleteStatusResponse,
+   TavilyGetResearchResponse,
+ } from "./types";
+-import { post, get, handleRequestError, handleTimeoutError } from "./utils";
+-import { AxiosError, AxiosResponse } from "axios";
+-import { Readable } from "stream";
++import { createTransport } from "./transport";
+ 
+ export function _research(requestConfig: TavilyRequestConfig): TavilyResearchFunction {
+   return async function research(
+@@ -25,95 +23,31 @@ export function _research(requestConfig: TavilyRequestConfig): TavilyResearchFun
+       ...(humanId !== undefined && { humanId }),
+       ...(clientName !== undefined && { clientName }),
+     };
++    const transport = createTransport(callConfig);
+ 
+-    if (stream) {
+-      try {
+-        const response = await post(
+-          "research",
+-          {
+-            input: input,
+-            model,
+-            output_schema: outputSchema,
+-            stream: stream,
+-            citation_format: citationFormat,
+-            ...kwargs,
+-          },
+-          callConfig,
+-          timeout,
+-          "stream"
+-        );
++    const body = {
++      input,
++      model,
++      output_schema: outputSchema,
++      stream,
++      citation_format: citationFormat,
++      ...kwargs,
++    };
+ 
+-        async function* streamGenerator(): AsyncGenerator<
+-          Buffer,
+-          void,
+-          unknown
+-        > {
+-          const stream = response.data as Readable;
+-          try {
+-            for await (const chunk of stream) {
+-              if (chunk) {
+-                yield chunk;
+-              }
+-            }
+-          } finally {
+-            if (!stream.destroyed) {
+-              stream.destroy();
+-            }
+-          }
+-        }
++    if (stream) {
++      return transport.stream("research", body, { timeoutSeconds: timeout });
++    }
+ 
+-        return streamGenerator();
+-      } catch (err) {
+-        if (err instanceof AxiosError) {
+-          if (err.code === "ECONNABORTED") {
+-            handleTimeoutError(timeout || 0);
+-          }
+-          if (err.response) {
+-            handleRequestError(err.response as AxiosResponse);
+-          }
+-        }
+-        throw new Error(
+-          `An unexpected error occurred while making the request. Error: ${err}`
+-        );
+-      }
+-    } else {
+-      try {
+-        const response = await post(
+-          "research",
+-          {
+-            input,
+-            model,
+-            output_schema: outputSchema,
+-            stream,
+-            citation_format: citationFormat,
+-            ...kwargs,
+-          },
+-          callConfig,
+-          timeout
+-        );
++    const data: any = await transport.post("research", body, { timeoutSeconds: timeout });
+ 
+-        return {
+-          requestId: response.data.request_id,
+-          createdAt: response.data.created_at,
+-          status: response.data.status,
+-          input: response.data.input,
+-          model: response.data.model,
+-          responseTime: response.data.response_time,
+-        };
+-      } catch (err) {
+-        if (err instanceof AxiosError) {
+-          if (err.code === "ECONNABORTED") {
+-            handleTimeoutError(timeout || 0);
+-          }
+-          if (err.response) {
+-            handleRequestError(err.response as AxiosResponse);
+-          }
+-        }
+-        throw new Error(
+-          `An unexpected error occurred while making the request. Error: ${err}`
+-        );
+-      }
+-    }
++    return {
++      requestId: data.request_id,
++      createdAt: data.created_at,
++      status: data.status,
++      input: data.input,
++      model: data.model,
++      responseTime: data.response_time,
++    };
+   };
+ }
+ 
+@@ -124,29 +58,12 @@ export function _getResearch(requestConfig: TavilyRequestConfig): TavilyGetResea
+   ) {
+     const { includeUsage } = options;
+ 
+-    const requestTimeout = 60; // Default timeout for GET requests
+-    try {
+-      const response = await get(
+-        `research/${requestId}`,
+-        requestConfig,
+-        requestTimeout,
+-        { include_usage: includeUsage }
+-      );
+-      return response.data as
+-        | TavilyGetResearchResponse
+-        | TavilyGetResearchIncompleteStatusResponse;
+-    } catch (err) {
+-      if (err instanceof AxiosError) {
+-        if (err.code === "ECONNABORTED") {
+-          handleTimeoutError(requestTimeout);
+-        }
+-        if (err.response) {
+-          handleRequestError(err.response as AxiosResponse);
+-        }
+-      }
+-      throw new Error(
+-        `An unexpected error occurred while making the request. Error: ${err}`
+-      );
+-    }
++    const data = await createTransport(requestConfig).get(`research/${requestId}`, {
++      timeoutSeconds: 60, // Default timeout for GET requests
++      params: { include_usage: includeUsage },
++    });
++    return data as
++      | TavilyGetResearchResponse
++      | TavilyGetResearchIncompleteStatusResponse;
+   };
+ }
+diff --git a/src/search.ts b/src/search.ts
+index 3d72c8b..84ad4a7 100644
+--- a/src/search.ts
++++ b/src/search.ts
+@@ -1,15 +1,10 @@
+-import { AxiosError, AxiosResponse } from "axios";
+ import { searchParameters } from "./parameters";
+ import {
+   TavilySearchOptions,
+   TavilySearchFuncton,
+   TavilyRequestConfig,
+ } from "./types";
+-import {
+-  post,
+-  handleRequestError,
+-  handleTimeoutError,
+-} from "./utils";
++import { createTransport } from "./transport";
+ 
+ // Map declared Search fields only; explicit API names and unknown extras win.
+ function serializeSearchParameters(parameters: Record<string, unknown>) {
+@@ -38,75 +33,60 @@ export function _search(requestConfig: TavilyRequestConfig): TavilySearchFuncton
+       ...(clientName !== undefined && { clientName }),
+     };
+ 
+-    try {
+-      const response = await post(
+-        "search",
+-        serializeSearchParameters({
+-          query,
+-          ...parameters,
+-          maxAgeHours: parameters.maxAgeHours ?? maxHours,
+-        }),
+-        callConfig,
+-        requestTimeout
+-      );
+-
+-      return {
++    const data: any = await createTransport(callConfig).post(
++      "search",
++      serializeSearchParameters({
+         query,
+-        responseTime: response.data.response_time,
+-        images: response.data.images.map((image: any) => {
+-          return {
+-            url: image?.url || image,
+-            description: image.description,
+-          };
+-        }),
+-        results: response.data.results.map((result: any) => {
+-          return {
+-            title: result.title,
+-            url: result.url,
+-            content: result.content,
+-            rawContent: result.raw_content,
+-            score: result.score,
+-            publishedDate: result.published_date,
+-            favicon: result.favicon,
+-            id: result.id,
+-            images: (Array.isArray(result.images) ? result.images : [])
+-              .map((image: any) => ({
+-                url: typeof image === "string" ? image : image?.url,
+-                description:
+-                  typeof image?.description === "string"
+-                    ? image.description
+-                    : undefined,
+-              }))
+-              .filter(({ url }: { url: unknown }) =>
+-                typeof url === "string" && url.trim().length > 0
+-              ),
+-          };
+-        }),
+-        answer: response.data.answer,
+-        requestId: response.data.request_id,
+-        ...(response.data.usage !== undefined && { usage: response.data.usage }),
+-        ...(response.data.auto_parameters && {
+-          autoParameters: {
+-            includeDomains: response.data.auto_parameters?.include_domains,
+-            excludeDomains: response.data.auto_parameters?.exclude_domains,
+-            topic: response.data.auto_parameters?.topic,
+-            timeRange: response.data.auto_parameters?.time_range,
+-            searchDepth: response.data.auto_parameters?.search_depth,
+-          },
+-        }),
+-      };
+-    } catch (err) {
+-      if (err instanceof AxiosError) {
+-        if (err.code === "ECONNABORTED") {
+-          handleTimeoutError(requestTimeout);
+-        }
+-        if (err.response) {
+-          handleRequestError(err.response as AxiosResponse);
+-        }
+-      }
+-      throw new Error(
+-        `An unexpected error occurred while making the request. Error: ${err}`
+-      );
+-    }
++        ...parameters,
++        maxAgeHours: parameters.maxAgeHours ?? maxHours,
++      }),
++      { timeoutSeconds: requestTimeout }
++    );
++
++    return {
++      query,
++      responseTime: data.response_time,
++      images: data.images.map((image: any) => {
++        return {
++          url: image?.url || image,
++          description: image.description,
++        };
++      }),
++      results: data.results.map((result: any) => {
++        return {
++          title: result.title,
++          url: result.url,
++          content: result.content,
++          rawContent: result.raw_content,
++          score: result.score,
++          publishedDate: result.published_date,
++          favicon: result.favicon,
++          id: result.id,
++          images: (Array.isArray(result.images) ? result.images : [])
++            .map((image: any) => ({
++              url: typeof image === "string" ? image : image?.url,
++              description:
++                typeof image?.description === "string"
++                  ? image.description
++                  : undefined,
++            }))
++            .filter(({ url }: { url: unknown }) =>
++              typeof url === "string" && url.trim().length > 0
++            ),
++        };
++      }),
++      answer: data.answer,
++      requestId: data.request_id,
++      ...(data.usage !== undefined && { usage: data.usage }),
++      ...(data.auto_parameters && {
++        autoParameters: {
++          includeDomains: data.auto_parameters?.include_domains,
++          excludeDomains: data.auto_parameters?.exclude_domains,
++          topic: data.auto_parameters?.topic,
++          timeRange: data.auto_parameters?.time_range,
++          searchDepth: data.auto_parameters?.search_depth,
++        },
++      }),
++    };
+   };
+ }
+diff --git a/src/transport.ts b/src/transport.ts
+new file mode 100644
+index 0000000..453c649
+--- /dev/null
++++ b/src/transport.ts
+@@ -0,0 +1,160 @@
++import axios, { AxiosAdapter, AxiosError, AxiosRequestConfig, AxiosResponse } from "axios";
++import { HttpsProxyAgent } from "https-proxy-agent";
++import { Readable } from "stream";
++import {
++  TavilyClientOptions,
++  TavilyProxyOptions,
++  TavilyRequestConfig,
++} from "./types";
++import {
++  BASE_URL,
++  buildHeaders,
++  handleRequestError,
++  handleTimeoutError,
++} from "./utils";
++
++export type TavilyTransport = {
++  post(
++    endpoint: string,
++    body: Record<string, unknown>,
++    opts?: { timeoutSeconds?: number }
++  ): Promise<unknown>;
++  get(
++    endpoint: string,
++    opts?: { timeoutSeconds?: number; params?: Record<string, unknown> }
++  ): Promise<unknown>;
++  stream(
++    endpoint: string,
++    body: Record<string, unknown>,
++    opts?: { timeoutSeconds?: number }
++  ): Promise<AsyncIterable<Buffer>>;
++};
++
++/** Resolves credentials, proxies, project and org from options, falling back to the environment. */
++export function resolveRequestConfig(options?: TavilyClientOptions): TavilyRequestConfig {
++  const apiKey = options?.apiKey || process.env.TAVILY_API_KEY;
++  const proxies = (() => {
++    const http = options?.proxies?.http || process.env.TAVILY_HTTP_PROXY;
++    const https = options?.proxies?.https || process.env.TAVILY_HTTPS_PROXY;
++
++    const result = {} as TavilyProxyOptions;
++
++    if (http) result.http = http;
++    if (https) result.https = https;
++
++    return Object.keys(result).length > 0 ? result : undefined;
++  })();
++
++  return {
++    ...(apiKey ? { apiKey } : {}),
++    proxies,
++    apiBaseURL: options?.apiBaseURL,
++    clientSource: options?.clientSource,
++    projectId: options?.projectId || process.env.TAVILY_PROJECT,
++    orgId: options?.orgId || process.env.TAVILY_ORG_ID,
++    sessionId: options?.sessionId,
++    humanId: options?.humanId,
++    clientName: options?.clientName,
++  };
++}
++
++async function readJsonBody(stream: Readable): Promise<unknown> {
++  const chunks: Buffer[] = [];
++  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
++  const text = Buffer.concat(chunks).toString("utf8");
++  try {
++    return JSON.parse(text);
++  } catch {
++    return text;
++  }
++}
++
++export function createTransport(
++  options: TavilyClientOptions & { adapter?: AxiosAdapter } = {}
++): TavilyTransport {
++  const { adapter, ...clientOptions } = options;
++  const requestConfig = resolveRequestConfig(clientOptions);
++  const { proxies, apiBaseURL } = requestConfig;
++  const isKeyless = !requestConfig.apiKey;
++
++  function axiosConfig(
++    endpoint: string,
++    timeoutSeconds: number | undefined,
++    extra: AxiosRequestConfig = {}
++  ): AxiosRequestConfig {
++    // Research endpoints have no default timeout.
++    const timeout = endpoint.includes("research") ? timeoutSeconds : timeoutSeconds ?? 60;
++    const config: AxiosRequestConfig = { headers: buildHeaders(requestConfig), ...extra };
++    if (timeout !== undefined) config.timeout = timeout * 1000;
++    if (proxies?.http) config.httpAgent = new HttpsProxyAgent(proxies.http);
++    if (proxies?.https) config.httpsAgent = new HttpsProxyAgent(proxies.https);
++    if (adapter) config.adapter = adapter;
++    return config;
++  }
++
++  async function send<T>(
++    timeoutSeconds: number | undefined,
++    request: () => Promise<T>
++  ): Promise<T> {
++    try {
++      return await request();
++    } catch (err) {
++      if (err instanceof AxiosError) {
++        if (err.code === "ECONNABORTED") {
++          handleTimeoutError(timeoutSeconds ?? 0);
++        }
++        if (err.response) {
++          const response = err.response as AxiosResponse;
++          if (response.data instanceof Readable) {
++            response.data = await readJsonBody(response.data);
++          }
++          handleRequestError(response, isKeyless);
++        }
++      }
++      throw new Error(
++        `An unexpected error occurred while making the request. Error: ${err}`
++      );
++    }
++  }
++
++  const url = (endpoint: string) => `${apiBaseURL || BASE_URL}/${endpoint}`;
++
++  return {
++    async post(endpoint, body, opts) {
++      const { timeoutSeconds } = opts ?? {};
++      const config = axiosConfig(endpoint, timeoutSeconds);
++      return (await send(timeoutSeconds, () => axios.post(url(endpoint), body, config))).data;
++    },
++
++    async get(endpoint, opts) {
++      const { timeoutSeconds, params } = opts ?? {};
++      const config = axiosConfig(endpoint, timeoutSeconds, { params });
++      return (await send(timeoutSeconds, () => axios.get(url(endpoint), config))).data;
++    },
++
++    async stream(endpoint, body, opts) {
++      const { timeoutSeconds } = opts ?? {};
++      const config = axiosConfig(endpoint, timeoutSeconds, { responseType: "stream" });
++      const response = await send(timeoutSeconds, () =>
++        axios.post(url(endpoint), body, config)
++      );
++
++      async function* chunks(): AsyncGenerator<Buffer, void, unknown> {
++        const stream = response.data as Readable;
++        try {
++          for await (const chunk of stream) {
++            if (chunk) {
++              yield chunk;
++            }
++          }
++        } finally {
++          if (!stream.destroyed) {
++            stream.destroy();
++          }
++        }
++      }
++
++      return chunks();
++    },
++  };
++}
+diff --git a/src/utils.ts b/src/utils.ts
+index 17bddae..09d5fa0 100644
+--- a/src/utils.ts
++++ b/src/utils.ts
+@@ -1,19 +1,19 @@
+-import axios, { AxiosRequestConfig, AxiosResponse } from "axios";
++import { AxiosResponse } from "axios";
+ import { TavilyRequestConfig } from "./types";
+-import { HttpsProxyAgent } from "https-proxy-agent";
+ import {
++  TavilyRequestError,
+   isKeylessLimitEnvelope,
+   keylessLimitErrorFromEnvelope,
+ } from "./errors";
+ 
+-const BASE_URL = "https://api.tavily.com";
++export const BASE_URL = "https://api.tavily.com";
+ export const DEFAULT_CHUNKS_PER_SOURCE = 3;
+ 
+ type TavilyErrorData = {
+   detail: { error: string };
+ };
+ 
+-function buildHeaders(requestConfig: TavilyRequestConfig): Record<string, string> {
++export function buildHeaders(requestConfig: TavilyRequestConfig): Record<string, string> {
+   const { apiKey, clientSource, projectId, orgId, sessionId, humanId, clientName } =
+     requestConfig;
+   const isKeyless = !apiKey;
+@@ -39,82 +39,24 @@ function buildHeaders(requestConfig: TavilyRequestConfig): Record<string, string
+   return headers;
+ }
+ 
+-export async function post(
+-  endpoint: string,
+-  body: any,
+-  requestConfig: TavilyRequestConfig,
+-  timeout?: number,
+-  responseType?: AxiosRequestConfig['responseType']
+-): Promise<AxiosResponse> {
+-  const { proxies, apiBaseURL } = requestConfig;
+-  const requestTimeout = endpoint === "research" ? timeout : timeout ?? 60; // Research endpoint has no default timeout
+-
+-  const url = `${apiBaseURL || BASE_URL}/${endpoint}`;
+-  const headers = buildHeaders(requestConfig);
+-
+-  const config: AxiosRequestConfig = { headers };
+-
+-  // Only set timeout if provided
+-  if (requestTimeout !== undefined) {
+-    const timeoutInMillis = requestTimeout * 1000;
+-    config.timeout = timeoutInMillis;
+-  }
+-
+-  if (proxies) {
+-    if (proxies.http) {
+-      config.httpAgent = new HttpsProxyAgent(proxies.http);
+-    }
+-    if (proxies.https) {
+-      config.httpsAgent = new HttpsProxyAgent(proxies.https);
+-    }
+-  }
+-
+-  if (responseType) {
+-    config.responseType = responseType;
+-  }
+-
+-  return axios.post(url, body, config);
+-}
+-
+-export async function get(
+-  endpoint: string,
+-  requestConfig: TavilyRequestConfig,
+-  timeout?: number,
+-  params?: Record<string, unknown>
+-): Promise<AxiosResponse> {
+-  const { proxies, apiBaseURL } = requestConfig;
+-  const url = `${apiBaseURL || BASE_URL}/${endpoint}`;
+-  const headers = buildHeaders(requestConfig);
+-
+-  const requestTimeout = endpoint.includes("research") ? timeout : timeout ?? 60; // Research endpoint has no default timeout
+-  const timeoutInMillis = requestTimeout ? requestTimeout * 1000 : undefined;
+-
+-  const config: AxiosRequestConfig = { headers, timeout: timeoutInMillis, params };
+-  if (proxies) {
+-    if (proxies.http) {
+-      config.httpAgent = new HttpsProxyAgent(proxies.http);
+-    }
+-    if (proxies.https) {
+-      config.httpsAgent = new HttpsProxyAgent(proxies.https);
+-    }
+-  }
+-  return axios.get(url, config);
+-}
+-
+-export function handleRequestError(res: AxiosResponse): never {
++export function handleRequestError(res: AxiosResponse, isKeyless: boolean): never {
+   const status = res.status;
++  const body = res.data;
+ 
+-  if (isKeylessLimitEnvelope(res.data)) {
+-    throw keylessLimitErrorFromEnvelope(res.data);
++  if (isKeyless && isKeylessLimitEnvelope(body)) {
++    throw keylessLimitErrorFromEnvelope(body);
+   }
+ 
+-  const message = (res.data as TavilyErrorData)?.detail?.error;
+-
+-  if (!message) {
+-    throw new Error(`${status} Error: ${JSON.stringify(res.data)}`);
+-  }
++  const message = (body as TavilyErrorData)?.detail?.error;
++  const docs = (body as { documentation?: unknown })?.documentation;
+ 
+-  throw new Error(`${(res.data as TavilyErrorData)?.detail?.error}`);
++  throw new TavilyRequestError({
++    message:
++      typeof message === "string" ? message : `${status} Error: ${JSON.stringify(body)}`,
++    status,
++    body,
++    docs: typeof docs === "string" ? docs : undefined,
++  });
+ }
+ 
+ export function handleTimeoutError(timeout: number): never {
+diff --git a/tests/transport.test.mjs b/tests/transport.test.mjs
+new file mode 100644
+index 0000000..ba89af6
+--- /dev/null
++++ b/tests/transport.test.mjs
+@@ -0,0 +1,171 @@
++import assert from "node:assert/strict";
++import { test } from "node:test";
++import { createServer } from "node:http";
++import { once } from "node:events";
++import { Readable } from "node:stream";
++import { AxiosError } from "axios";
++import {
++  tavily,
++  createTransport,
++  TavilyRequestError,
++  TavilyKeylessLimitError,
++} from "../dist/index.mjs";
++
++for (const key of ["TAVILY_API_KEY", "TAVILY_HTTP_PROXY", "TAVILY_HTTPS_PROXY", "TAVILY_PROJECT", "TAVILY_ORG_ID"]) {
++  delete process.env[key];
++}
++
++// Adapter stub: records the request and answers with a canned status/body, rejecting like axios does for non-2xx.
++function stub(status, data, calls = []) {
++  return async (config) => {
++    calls.push(config);
++    const response = { data, status, statusText: "", headers: {}, config, request: {} };
++    if (status >= 200 && status < 300) return response;
++    throw new AxiosError(`status ${status}`, "ERR_BAD_REQUEST", config, {}, response);
++  };
++}
++
++const fullOptions = {
++  apiKey: "tvly-key",
++  clientSource: "my-cli",
++  sessionId: "s1",
++  humanId: "h1",
++  clientName: "c1",
++  projectId: "p1",
++  orgId: "o1",
++};
++
++test("keyed headers carry credentials and identity", async () => {
++  const calls = [];
++  const t = createTransport({ ...fullOptions, adapter: stub(200, { ok: true }, calls) });
++  await t.post("search", { query: "x" });
++  const h = calls[0].headers;
++  assert.equal(h.get("Authorization"), "Bearer tvly-key");
++  assert.equal(h.get("X-Client-Source"), "my-cli");
++  assert.equal(h.get("X-Session-Id"), "s1");
++  assert.equal(h.get("X-Human-Id"), "h1");
++  assert.equal(h.get("X-Client-Name"), "c1");
++  assert.equal(h.get("X-Project-ID"), "p1");
++  assert.equal(h.get("X-Tavily-Orgid"), "o1");
++  assert.match(h.get("Content-Type"), /application\/json/);
++});
++
++test("keyless headers have the access mode and no Authorization", async () => {
++  const calls = [];
++  const t = createTransport({ adapter: stub(200, {}, calls) });
++  await t.post("search", {});
++  const h = calls[0].headers;
++  assert.equal(h.get("X-Tavily-Access-Mode"), "keyless");
++  assert.equal(h.get("Authorization"), undefined);
++});
++
++test("432 rejects with TavilyRequestError carrying status, body and docs", async () => {
++  const body = { detail: { error: "Plan limit" }, documentation: "https://docs.tavily.com/x" };
++  const t = createTransport({ apiKey: "k", adapter: stub(432, body) });
++  await assert.rejects(t.post("search", {}), (err) => {
++    assert.ok(err instanceof TavilyRequestError);
++    assert.equal(err.message, "Plan limit");
++    assert.equal(err.status, 432);
++    assert.equal(err.docs, "https://docs.tavily.com/x");
++    assert.deepEqual(err.body, body);
++    return true;
++  });
++});
++
++test("error without detail uses the status and JSON body as message", async () => {
++  const t = createTransport({ apiKey: "k", adapter: stub(500, { oops: 1 }) });
++  await assert.rejects(t.get("research/abc"), (err) => {
++    assert.ok(err instanceof TavilyRequestError);
++    assert.equal(err.message, '500 Error: {"oops":1}');
++    assert.equal(err.docs, undefined);
++    return true;
++  });
++});
++
++const envelope = { error: { code: "keyless_hourly_cap", message: "Cap hit", retry_after_seconds: 5 } };
++
++test("keyless envelope: TavilyRequestError when keyed, TavilyKeylessLimitError when keyless", async () => {
++  const keyed = createTransport({ apiKey: "k", adapter: stub(429, envelope) });
++  await assert.rejects(keyed.post("search", {}), (err) => {
++    assert.ok(err instanceof TavilyRequestError);
++    assert.equal(err.status, 429);
++    return true;
++  });
++  const keyless = createTransport({ adapter: stub(429, envelope) });
++  await assert.rejects(keyless.post("search", {}), (err) => {
++    assert.ok(err instanceof TavilyKeylessLimitError);
++    assert.equal(err.capType, "keyless_hourly_cap");
++    return true;
++  });
++});
++
++test("post and get return the raw snake_case body", async () => {
++  const body = { response_time: 1.5, request_id: "r", results: [{ raw_content: "x" }] };
++  const calls = [];
++  const t = createTransport({ apiKey: "k", apiBaseURL: "http://example.test", adapter: stub(200, body, calls) });
++  assert.deepEqual(await t.post("search", { query: "q" }), body);
++  assert.deepEqual(await t.get("research/abc", { params: { include_usage: true } }), body);
++  assert.equal(calls[0].url, "http://example.test/search");
++  assert.equal(calls[1].url, "http://example.test/research/abc");
++  assert.deepEqual(calls[1].params, { include_usage: true });
++});
++
++test("timeouts default to 60s except research, and abort with the same message", async () => {
++  const calls = [];
++  const t = createTransport({ apiKey: "k", adapter: stub(200, {}, calls) });
++  await t.post("search", {});
++  await t.post("research", {});
++  await t.post("search", {}, { timeoutSeconds: 5 });
++  assert.equal(calls[0].timeout, 60000);
++  assert.ok(!calls[1].timeout, "research has no default timeout (axios normalizes to 0)");
++  assert.equal(calls[2].timeout, 5000);
++
++  const timingOut = async (config) => {
++    throw new AxiosError("timeout", "ECONNABORTED", config);
++  };
++  const t2 = createTransport({ apiKey: "k", adapter: timingOut });
++  await assert.rejects(t2.post("search", {}, { timeoutSeconds: 7 }), { message: "Request timed out after 7 seconds." });
++});
++
++test("stream yields the chunks", async () => {
++  const t = createTransport({ apiKey: "k", adapter: stub(200, Readable.from([Buffer.from("a"), Buffer.from("b")])) });
++  const chunks = [];
++  for await (const chunk of await t.stream("research", { input: "x", stream: true })) chunks.push(chunk.toString());
++  assert.deepEqual(chunks, ["a", "b"]);
++});
++
++test("stream rejects with a parsed TavilyRequestError on error status", async () => {
++  const body = Readable.from([Buffer.from(JSON.stringify({ detail: { error: "Plan limit" } }))]);
++  const t = createTransport({ apiKey: "k", adapter: stub(432, body) });
++  await assert.rejects(t.stream("research", {}), (err) => {
++    assert.ok(err instanceof TavilyRequestError);
++    assert.equal(err.status, 432);
++    assert.equal(err.message, "Plan limit");
++    return true;
++  });
++});
++
++test("client.search still returns camelCase", async () => {
++  process.env.NO_PROXY = "127.0.0.1";
++  const srv = createServer((req, res) => {
++    req.resume();
++    res.setHeader("Content-Type", "application/json");
++    res.end(JSON.stringify({
++      images: [],
++      results: [{ title: "T", url: "https://e.com", content: "c", raw_content: "r", score: 1 }],
++      response_time: 0.1,
++      request_id: "id",
++    }));
++  });
++  srv.listen(0, "127.0.0.1");
++  await once(srv, "listening");
++  try {
++    const client = tavily({ apiKey: "k", apiBaseURL: `http://127.0.0.1:${srv.address().port}` });
++    const res = await client.search("q");
++    assert.equal(res.responseTime, 0.1);
++    assert.equal(res.requestId, "id");
++    assert.equal(res.results[0].rawContent, "r");
++  } finally {
++    await new Promise((r) => srv.close(r));
++  }
++});
+-- 
+2.50.1 (Apple Git-155)
+
+
+From 7338dce03d7142bec5c08b3153df6033ff3ad5a1 Mon Sep 17 00:00:00 2001
+From: Guy Hartstein <guyh2020@gmail.com>
+Date: Tue, 3 Nov 2026 11:37:04 -0500
+Subject: [PATCH 2/3] fix: honor clientSource in keyless mode and treat empty
+ error as missing
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ CHANGELOG.md             |  4 ++++
+ src/utils.ts             |  4 ++--
+ tests/transport.test.mjs | 14 ++++++++++++++
+ 3 files changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index a5b35a3..3b493c3 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -15,6 +15,10 @@
+ 
+ - A keyless-limit response received in keyed mode now throws `TavilyRequestError` instead of
+   `TavilyKeylessLimitError`, which is thrown only in keyless mode.
++- Keyless mode now honors `clientSource` for `X-Client-Source`; the default stays
++  `tavily-js-keyless`.
++- Errors raised while mapping a malformed response body are no longer wrapped in
++  "An unexpected error occurred while making the request".
+ - Streaming research errors now carry the parsed error body instead of an unread stream.
+ 
+ ## 1.0.0 (unreleased)
+diff --git a/src/utils.ts b/src/utils.ts
+index 09d5fa0..c5469dd 100644
+--- a/src/utils.ts
++++ b/src/utils.ts
+@@ -24,7 +24,7 @@ export function buildHeaders(requestConfig: TavilyRequestConfig): Record<string,
+ 
+   if (isKeyless) {
+     headers["X-Tavily-Access-Mode"] = "keyless";
+-    headers["X-Client-Source"] = "tavily-js-keyless";
++    headers["X-Client-Source"] = clientSource || "tavily-js-keyless";
+   } else {
+     headers["Authorization"] = `Bearer ${apiKey}`;
+     headers["X-Client-Source"] = clientSource || "tavily-js";
+@@ -52,7 +52,7 @@ export function handleRequestError(res: AxiosResponse, isKeyless: boolean): neve
+ 
+   throw new TavilyRequestError({
+     message:
+-      typeof message === "string" ? message : `${status} Error: ${JSON.stringify(body)}`,
++      typeof message === "string" && message ? message : `${status} Error: ${JSON.stringify(body)}`,
+     status,
+     body,
+     docs: typeof docs === "string" ? docs : undefined,
+diff --git a/tests/transport.test.mjs b/tests/transport.test.mjs
+index ba89af6..a6bf0ea 100644
+--- a/tests/transport.test.mjs
++++ b/tests/transport.test.mjs
+@@ -59,6 +59,20 @@ test("keyless headers have the access mode and no Authorization", async () => {
+   assert.equal(h.get("Authorization"), undefined);
+ });
+ 
++test("keyless X-Client-Source honors clientSource and defaults to tavily-js-keyless", async () => {
++  const calls = [];
++  const adapter = stub(200, {}, calls);
++  await createTransport({ clientSource: "x-keyless", adapter }).post("search", {});
++  await createTransport({ adapter }).post("search", {});
++  assert.equal(calls[0].headers.get("X-Client-Source"), "x-keyless");
++  assert.equal(calls[1].headers.get("X-Client-Source"), "tavily-js-keyless");
++});
++
++test("empty detail.error falls back to the status form", async () => {
++  const t = createTransport({ apiKey: "k", adapter: stub(400, { detail: { error: "" } }) });
++  await assert.rejects(t.post("search", {}), { message: '400 Error: {"detail":{"error":""}}' });
++});
++
+ test("432 rejects with TavilyRequestError carrying status, body and docs", async () => {
+   const body = { detail: { error: "Plan limit" }, documentation: "https://docs.tavily.com/x" };
+   const t = createTransport({ apiKey: "k", adapter: stub(432, body) });
+-- 
+2.50.1 (Apple Git-155)
+
+
+From cce79bf7d6bc75f294c103d4b68a5679295b3efd Mon Sep 17 00:00:00 2001
+From: Guy Hartstein <guyh2020@gmail.com>
+Date: Tue, 3 Nov 2026 15:49:59 -0500
+Subject: [PATCH 3/3] feat: expose window on TavilyKeylessLimitError
+
+Read the keyless envelope's window field (string, else null) so callers can
+report which cap window was hit.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ src/errors.ts            |  5 +++++
+ tests/transport.test.mjs | 16 ++++++++++++++++
+ 2 files changed, 21 insertions(+)
+
+diff --git a/src/errors.ts b/src/errors.ts
+index d781ece..ebc9a78 100644
+--- a/src/errors.ts
++++ b/src/errors.ts
+@@ -35,6 +35,8 @@ export class TavilyKeylessLimitError extends Error {
+   public readonly retryAfter: number | null;
+   public readonly bonusEligible: boolean;
+   public readonly continuationPaths: TavilyContinuationPath[];
++  /** The cap's window as the API names it (for example "hour"), or null when absent. */
++  public readonly window: string | null;
+ 
+   constructor(params: {
+     message: string;
+@@ -42,6 +44,7 @@ export class TavilyKeylessLimitError extends Error {
+     retryAfter: number | null;
+     bonusEligible: boolean;
+     continuationPaths: TavilyContinuationPath[];
++    window?: string | null;
+   }) {
+     super(params.message);
+     this.name = "TavilyKeylessLimitError";
+@@ -49,6 +52,7 @@ export class TavilyKeylessLimitError extends Error {
+     this.retryAfter = params.retryAfter;
+     this.bonusEligible = params.bonusEligible;
+     this.continuationPaths = params.continuationPaths;
++    this.window = params.window ?? null;
+ 
+     Object.setPrototypeOf(this, TavilyKeylessLimitError.prototype);
+   }
+@@ -84,6 +88,7 @@ export function keylessLimitErrorFromEnvelope(
+         : null,
+     bonusEligible,
+     continuationPaths: nextActions,
++    window: typeof err.window === "string" ? err.window : null,
+   });
+ }
+ 
+diff --git a/tests/transport.test.mjs b/tests/transport.test.mjs
+index a6bf0ea..e1b2ee6 100644
+--- a/tests/transport.test.mjs
++++ b/tests/transport.test.mjs
+@@ -113,6 +113,22 @@ test("keyless envelope: TavilyRequestError when keyed, TavilyKeylessLimitError w
+   });
+ });
+ 
++test("keyless limit error carries the envelope's window, or null without one", async () => {
++  const withWindow = createTransport({
++    adapter: stub(429, { error: { ...envelope.error, window: "hour" } }),
++  });
++  await assert.rejects(withWindow.post("search", {}), (err) => {
++    assert.ok(err instanceof TavilyKeylessLimitError);
++    assert.equal(err.window, "hour");
++    return true;
++  });
++  const without = createTransport({ adapter: stub(429, envelope) });
++  await assert.rejects(without.post("search", {}), (err) => {
++    assert.equal(err.window, null);
++    return true;
++  });
++});
++
+ test("post and get return the raw snake_case body", async () => {
+   const body = { response_time: 1.5, request_id: "r", results: [{ raw_content: "x" }] };
+   const calls = [];
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,21 @@
+event: message
+data: {"id":"1","choices":[{"delta":{"role":"assistant","tool_calls":{"type":"tool_call","tool_call":[{"name":"Planning","arguments":""}]}}}]}
+
+data: {"id":"2","choices":[{"delta":{"tool_calls":{"type":"tool_call","tool_call":[{"name":"WebSearch","arguments":"rust async"}]}}}]}
+
+data: {"id":"3","choices":[{"delta":{"tool_calls":{"type":"tool_call","tool_call":[{"name":"WebSearch","arguments":"rust async"}]}}}]}
+
+data: {"id":"4","choices":[{"delta":{"tool_calls":{"type":"tool_response","tool_response":[{"name":"WebSearch","sources":[{"url":"https://a.example"},{"url":"https://b.example"}]}]}}}]}
+
+data: {"id":"5","choices":[{"delta":{"content":"# Report\n\n"}}]}
+
+data: {"id":"6","choices":[{"delta":{"content":"Rust async is \u001b[31mfast\u001b[0m."}}]}
+
+data: {"id":"7","choices":[{"delta":{"sources":[{"title":"A","url":"https://a.example"},{"title":"B","url":"https://b.example"}]}}]}
+
+data:
+
+data: not json
+
+data: [DONE]
+
