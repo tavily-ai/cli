@@ -141,7 +141,6 @@ export function createMcpClient(opts: McpClientOptions): TavilyClientLike {
       });
     }
     if ("error" in message) throw rpcError(message.error);
-    if (payload === undefined) return (isObject(message.result) ? message.result : message) as Json;
     return unwrapResult(message);
   }
 

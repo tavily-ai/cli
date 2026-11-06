@@ -145,19 +145,22 @@ test("crawl --output-dir gives colliding slugs distinct files", async () => {
       { url: "https://a.example/list?page=2", raw_content: "two" },
       { url: "https://a.example/docs/a_b", raw_content: "three" },
       { url: "https://a.example/docs/a:b", raw_content: "four" },
+      { url: "https://a.example/docs/a;b", raw_content: "five" },
     ],
   };
   await runProgram(
     ["crawl", "https://a.example", "--output-dir", dir],
     stubClient({ crawl: async () => data }),
   );
-  const files = readdirSync(dir).sort();
-  expect(files).toHaveLength(4);
-  expect(files).toContain("a.example_list_page_1.md");
-  expect(files).toContain("a.example_list_page_2.md");
-  expect(files).toContain("a.example_docs_a_b.md");
-  expect(files.some((f) => /^a\.example_docs_a_b-[0-9a-f]{6}\.md$/.test(f))).toBe(true);
-  expect(io.stderr()).toContain(`Saved 4 pages to ${dir}/`);
+  expect(readdirSync(dir).sort()).toEqual([
+    "a.example_docs_a_b-2.md",
+    "a.example_docs_a_b-3.md",
+    "a.example_docs_a_b.md",
+    "a.example_list_page_1.md",
+    "a.example_list_page_2.md",
+  ]);
+  expect(readFileSync(join(dir, "a.example_docs_a_b-3.md"), "utf8")).toContain("five");
+  expect(io.stderr()).toContain(`Saved 5 pages to ${dir}/`);
 });
 
 test("terminal map output is a tree rooted at the base URL", async () => {

@@ -60,7 +60,7 @@ describe("installAgentSkills", () => {
     const calls: Call[] = [];
     const agents = ["claude-code", "codex", "cursor"];
     const run = (spawnImpl: never) =>
-      installAgentSkills(agents, { home, env: {}, which, spawnImpl });
+      installAgentSkills(agents, { home, env: {}, which, spawnImpl, platform: "linux" });
 
     const first = await run(fakeNpx(home, calls));
     const { cmd, args, opts } = calls[0] as Call;

@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { isTerminal, plain, safeLink, sanitizeControl, tree } from "../text.js";
@@ -19,7 +18,7 @@ function slugOf(url: string): string {
 
 /**
  * Write each page that has content to `<dir>/<slug>.md` as `# <url>`, a blank line, and the content.
- * A slug already used in this run gets the first 6 hex of the URL's sha1 appended.
+ * A slug already used in this run gets the first free `-2`, `-3`, ... suffix.
  */
 function saveCrawlToDir(data: Json, dir: string): void {
   mkdirSync(dir, { recursive: true });
@@ -27,11 +26,10 @@ function saveCrawlToDir(data: Json, dir: string): void {
   for (const page of list<Page>(data.results)) {
     if (!page.raw_content) continue;
     const url = page.url ?? "";
-    let name = slugOf(url);
+    const slug = slugOf(url);
+    let name = slug;
     // Lower-cased so case-insensitive filesystems cannot collide either.
-    if (used.has(name.toLowerCase())) {
-      name += `-${createHash("sha1").update(url).digest("hex").slice(0, 6)}`;
-    }
+    for (let n = 2; used.has(name.toLowerCase()); n++) name = `${slug}-${n}`;
     used.add(name.toLowerCase());
     writeFileSync(path.join(dir, `${name}.md`), `# ${url}\n\n${page.raw_content}\n`);
   }
