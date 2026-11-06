@@ -1,21 +1,16 @@
 /** tvly research — deep research via the Tavily API (async: run/status/poll, or a live stream). */
 import { readFileSync } from "node:fs";
-import { type Command, InvalidArgumentError } from "commander";
-import { getClient, requireApiKeyFriendly } from "../core/client-factory.js";
+import type { Command } from "commander";
+import { getKeyedClient } from "../core/client-factory.js";
 import type { Json, TavilyClientLike } from "../core/tavily-client.js";
-import { resolveOutput } from "../ui/output-file.js";
-import { emit, printResearchResult } from "../ui/render.js";
+import { messageOf } from "../errors.js";
+import { emit, resolveOutput } from "../ui/render/emit.js";
+import { printResearchResult } from "../ui/render/research.js";
 import { spinner, withSpinner } from "../ui/spinner.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
-import { readQueryArg, resolveJson, runWithApiErrors } from "./shared.js";
-
-export interface ResearchDeps {
-  requireApiKeyFriendly?: typeof requireApiKeyFriendly;
-  getClient?: typeof getClient;
-  readStdin?: () => string;
-  sleep?: (ms: number) => Promise<void>;
-}
+import { resolveJson } from "./options.js";
+import { handleApiError, readQueryArg, runWithApiErrors } from "./shared.js";
 
 export interface PollOptions {
   pollInterval: number;
@@ -55,63 +50,57 @@ export function normalizeResearchArgs(args: string[]): string[] {
   return args;
 }
 
-const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const isDone = (r: Json) => r.status === "completed" || r.status === "failed";
 
-async function connect(
-  cmd: Command,
-  label: string,
-  clientName: string | undefined,
-  deps: ResearchDeps,
-) {
+async function connect(cmd: Command, label: string, clientName: string | undefined) {
   const json = resolveJson(cmd);
-  await (deps.requireApiKeyFriendly ?? requireApiKeyFriendly)(label, { json });
-  const client = await (deps.getClient ?? getClient)({
-    json,
-    ...(clientName ? { clientName } : {}),
-  });
-  return { json, client };
+  return { json, client: await getKeyedClient(label, { json, clientName }) };
 }
 
 /**
- * Poll until the task completes or fails; undefined on timeout. JSON mode sleeps `pollInterval`
- * seconds (at least 1) between checks; human mode ticks every second with an elapsed-time spinner. The spinner
- * stops before any API error propagates to the caller's `runWithApiErrors`.
+ * Poll every `pollInterval` seconds (at least 1) until the task completes or fails; undefined once
+ * `timeout` seconds of wall time pass. Ticks every second so human mode's elapsed-time spinner stays
+ * current; the spinner stops before any API error reaches the caller's `runWithApiErrors`.
  */
 async function waitForResult(
   client: TavilyClientLike,
   requestId: string,
   opts: { json: boolean; pollInterval: number; timeout: number; label: string },
-  sleep: (ms: number) => Promise<void>,
 ): Promise<Json | undefined> {
-  if (opts.json) {
-    const deadline = Date.now() + opts.timeout * 1000;
-    while (Date.now() < deadline) {
-      const response = await client.getResearch(requestId);
-      if (isDone(response)) return response;
-      await sleep(Math.max(1, opts.pollInterval) * 1000);
-    }
-    return undefined;
-  }
-  let elapsed = 0;
-  const message = () => colors.aqua(`${opts.label}... ${elapsed}s elapsed`);
-  const live = spinner(message(), { enabled: true });
+  const start = Date.now();
+  const deadline = start + opts.timeout * 1000;
+  const message = () =>
+    colors.aqua(`${opts.label}... ${Math.floor((Date.now() - start) / 1000)}s elapsed`);
+  const live = spinner(message(), !opts.json);
   try {
-    let nextPoll = 0;
-    while (elapsed < opts.timeout) {
+    let nextPoll = start;
+    while (Date.now() < deadline) {
       live.update(message());
-      if (elapsed >= nextPoll) {
+      if (Date.now() >= nextPoll) {
         const response = await client.getResearch(requestId);
         if (isDone(response)) return response;
-        nextPoll = elapsed + opts.pollInterval;
+        nextPoll = Date.now() + Math.max(1, opts.pollInterval) * 1000;
       }
       await sleep(1000);
-      elapsed += 1;
     }
     return undefined;
   } finally {
     live.stop();
   }
+}
+
+/** Print the finished task, or the timeout notice (followed by `hint` in human mode). */
+async function finishWait(
+  response: Json | undefined,
+  requestId: string,
+  opts: { json: boolean; outputFile: string | undefined; timeout: number },
+  hint = "",
+): Promise<void> {
+  const { json, outputFile } = opts;
+  if (response) return printResearchResult(response, { json, outputFile });
+  if (json) emit({ request_id: requestId, status: "timeout" }, { outputFile, pretty: false });
+  else err(colors.yellow(`Timed out after ${opts.timeout}s.${hint}`));
 }
 
 type StreamEvent = {
@@ -176,15 +165,8 @@ export async function run(
   query: string | undefined,
   opts: RunOptions,
   cmd: Command,
-  deps: ResearchDeps = {},
 ): Promise<void> {
-  let input: string;
-  try {
-    input = readQueryArg(query, deps.readStdin);
-  } catch (e) {
-    if (e instanceof InvalidArgumentError) cmd.error(`error: ${e.message}`);
-    throw e;
-  }
+  const input = readQueryArg(query, cmd);
   const outputFile = resolveOutput(opts.output, "research", input);
 
   const body: Json = { input };
@@ -193,13 +175,12 @@ export async function run(
     try {
       body.output_schema = JSON.parse(readFileSync(opts.outputSchema, "utf8"));
     } catch (e) {
-      const reason = e instanceof Error ? e.message : String(e);
-      cmd.error(`error: --output-schema must be a path to a JSON file: ${reason}`);
+      cmd.error(`error: --output-schema must be a path to a JSON file: ${messageOf(e)}`);
     }
   }
   if (opts.citationFormat !== undefined) body.citation_format = opts.citationFormat;
 
-  const { json, client } = await connect(cmd, "research", opts.clientName, deps);
+  const { json, client } = await connect(cmd, "research", opts.clientName);
 
   if (opts.stream) {
     await runWithApiErrors(json, async () => {
@@ -212,7 +193,7 @@ export async function run(
   }
 
   const result = await runWithApiErrors(json, () =>
-    withSpinner("Starting research...", { enabled: !json }, () => client.research(body)),
+    withSpinner("Starting research...", !json, () => client.research(body)),
   );
   // A synchronous result (the MCP endpoint returns one) needs no polling.
   if (isDone(result) || result.content) {
@@ -222,10 +203,7 @@ export async function run(
 
   const requestId = result.request_id;
   if (typeof requestId !== "string" || !requestId) {
-    await runWithApiErrors(json, async () => {
-      throw new Error(`Unexpected API response: ${JSON.stringify(result)}`);
-    });
-    return;
+    handleApiError(new Error(`Unexpected API response: ${JSON.stringify(result)}`), json);
   }
 
   if (opts.wait === false) {
@@ -237,25 +215,15 @@ export async function run(
   }
 
   const response = await runWithApiErrors(json, () =>
-    waitForResult(
-      client,
-      requestId,
-      { json, pollInterval: opts.pollInterval, timeout: opts.timeout, label: "Researching" },
-      deps.sleep ?? defaultSleep,
-    ),
+    waitForResult(client, requestId, {
+      json,
+      pollInterval: opts.pollInterval,
+      timeout: opts.timeout,
+      label: "Researching",
+    }),
   );
-  if (response === undefined) {
-    if (json) emit({ request_id: requestId, status: "timeout" }, { outputFile, pretty: false });
-    else {
-      err(
-        colors.yellow(
-          `Timed out after ${opts.timeout}s. Resume with: tvly research poll ${sanitizeControl(requestId)}`,
-        ),
-      );
-    }
-    return;
-  }
-  await printResearchResult(response, { json, outputFile });
+  const hint = ` Resume with: tvly research poll ${sanitizeControl(requestId)}`;
+  await finishWait(response, requestId, { json, outputFile, timeout: opts.timeout }, hint);
 }
 
 const STATUS_COLORS: Record<string, (s: string) => string> = {
@@ -267,9 +235,8 @@ export async function status(
   requestId: string,
   opts: { clientName?: string },
   cmd: Command,
-  deps: ResearchDeps = {},
 ): Promise<void> {
-  const { json, client } = await connect(cmd, "research status", opts.clientName, deps);
+  const { json, client } = await connect(cmd, "research status", opts.clientName);
   const response = await runWithApiErrors(json, () => client.getResearch(requestId));
   if (json) {
     emit(response, { pretty: false });
@@ -287,27 +254,17 @@ export async function status(
   }
 }
 
-export async function poll(
-  requestId: string,
-  opts: PollOptions,
-  cmd: Command,
-  deps: ResearchDeps = {},
-): Promise<void> {
+export async function poll(requestId: string, opts: PollOptions, cmd: Command): Promise<void> {
   const outputFile = resolveOutput(opts.output, "research", requestId);
-  const { json, client } = await connect(cmd, "research poll", opts.clientName, deps);
+  const { json, client } = await connect(cmd, "research poll", opts.clientName);
   const label = `Polling research ${sanitizeControl(requestId.slice(0, 8))}`;
   const response = await runWithApiErrors(json, () =>
-    waitForResult(
-      client,
-      requestId,
-      { json, pollInterval: opts.pollInterval, timeout: opts.timeout, label },
-      deps.sleep ?? defaultSleep,
-    ),
+    waitForResult(client, requestId, {
+      json,
+      pollInterval: opts.pollInterval,
+      timeout: opts.timeout,
+      label,
+    }),
   );
-  if (response === undefined) {
-    if (json) emit({ request_id: requestId, status: "timeout" }, { outputFile, pretty: false });
-    else err(colors.yellow(`Timed out after ${opts.timeout}s.`));
-    return;
-  }
-  await printResearchResult(response, { json, outputFile });
+  await finishWait(response, requestId, { json, outputFile, timeout: opts.timeout });
 }

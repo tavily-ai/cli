@@ -6,20 +6,19 @@ import { spawn } from "node:child_process";
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { OAuthError } from "../errors.js";
+import { isObject, messageOf, OAuthError } from "../errors.js";
 
 export const MCP_ISSUER = "https://mcp.tavily.com/";
-export const MCP_RESOURCE = "https://mcp.tavily.com/mcp";
-export const OAUTH_METADATA_URL = "https://mcp.tavily.com/.well-known/oauth-authorization-server";
-export const PRM_URL = "https://mcp.tavily.com/.well-known/oauth-protected-resource/mcp";
-export const DEFAULT_SCOPES = "openid offline_access";
-export const CLIENT_NAME = "Tavily CLI";
-export const LOGIN_TIMEOUT_SECONDS = 180;
-export const HTTP_TIMEOUT_MS = 30_000;
+const MCP_RESOURCE = "https://mcp.tavily.com/mcp";
+const OAUTH_METADATA_URL = "https://mcp.tavily.com/.well-known/oauth-authorization-server";
+const PRM_URL = "https://mcp.tavily.com/.well-known/oauth-protected-resource/mcp";
+const DEFAULT_SCOPES = "openid offline_access";
+const CLIENT_NAME = "Tavily CLI";
+const LOGIN_TIMEOUT_SECONDS = 180;
+const HTTP_TIMEOUT_MS = 30_000;
 const EXPIRY_SKEW_SECONDS = 60;
 
-const FALLBACK_METADATA: Record<string, string> = {
-  issuer: MCP_ISSUER,
+const FALLBACK_METADATA = {
   authorization_endpoint: "https://mcp.tavily.com/authorize",
   token_endpoint: "https://mcp.tavily.com/token",
   registration_endpoint: "https://mcp.tavily.com/register",
@@ -111,7 +110,7 @@ async function transport<T>(fn: () => Promise<T>): Promise<T> {
     return await fn();
   } catch (e) {
     const cause = e instanceof Error && e.cause instanceof Error ? e.cause.message : "";
-    const message = e instanceof Error ? e.message : String(e);
+    const message = messageOf(e);
     throw new OAuthError(
       `Could not reach the Tavily OAuth server: ${message}${cause ? `: ${cause}` : ""}`,
     );
@@ -121,7 +120,7 @@ async function transport<T>(fn: () => Promise<T>): Promise<T> {
 export async function fetchMetadata(
   fetchImpl: typeof fetch = globalThis.fetch,
 ): Promise<OAuthMetadata> {
-  const data: Record<string, string> = { ...FALLBACK_METADATA };
+  const data = { ...FALLBACK_METADATA };
 
   // Discovery failures (network, non-2xx, bad JSON) fall back to the static endpoints;
   // OAuthError (untrusted metadata) always propagates.
@@ -140,12 +139,7 @@ export async function fetchMetadata(
     if (discovered.issuer !== MCP_ISSUER) {
       throw new OAuthError("OAuth discovery issuer does not match the configured Tavily issuer.");
     }
-    for (const field of [
-      "authorization_endpoint",
-      "token_endpoint",
-      "registration_endpoint",
-      "revocation_endpoint",
-    ]) {
+    for (const field of Object.keys(data) as (keyof typeof data)[]) {
       const value = discovered[field];
       if (typeof value === "string") data[field] = validatedHttpsUrl(value, field);
     }
@@ -163,24 +157,14 @@ export async function fetchMetadata(
     resource = discoveredResource;
   }
 
-  const { registration_endpoint: registration, authorization_endpoint: authorization } = data;
-  const { token_endpoint: token, revocation_endpoint: revocation } = data;
-  if (!registration || !authorization || !token) {
-    throw new OAuthError(
-      "OAuth discovery did not return authorization, token, and registration endpoints.",
-    );
-  }
+  // Every endpoint is a fallback constant or was validated above.
   return {
-    authorizationEndpoint: validatedHttpsUrl(authorization, "authorization_endpoint"),
-    tokenEndpoint: validatedHttpsUrl(token, "token_endpoint"),
-    registrationEndpoint: validatedHttpsUrl(registration, "registration_endpoint"),
-    revocationEndpoint: revocation ? validatedHttpsUrl(revocation, "revocation_endpoint") : null,
+    authorizationEndpoint: data.authorization_endpoint,
+    tokenEndpoint: data.token_endpoint,
+    registrationEndpoint: data.registration_endpoint,
+    revocationEndpoint: data.revocation_endpoint,
     resource,
   };
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function jsonObjectResponse(
@@ -202,14 +186,11 @@ async function jsonObjectResponse(
   return data;
 }
 
-export function httpErrorMessage(prefix: string, status: number, text: string): string {
-  let detail = text.trim().replaceAll("\n", " ");
-  if (detail.length > 280) detail = `${detail.slice(0, 277)}...`;
-  return detail ? `${prefix} (HTTP ${status}): ${detail}` : `${prefix} (HTTP ${status}).`;
-}
-
 async function httpError(prefix: string, resp: Response): Promise<OAuthError> {
-  return new OAuthError(httpErrorMessage(prefix, resp.status, await transport(() => resp.text())));
+  let detail = (await transport(() => resp.text())).trim().replaceAll("\n", " ");
+  if (detail.length > 280) detail = `${detail.slice(0, 277)}...`;
+  const status = `${prefix} (HTTP ${resp.status})`;
+  return new OAuthError(detail ? `${status}: ${detail}` : `${status}.`);
 }
 
 export async function registerClient(
@@ -366,7 +347,6 @@ export async function revokeToken(
   { tokenTypeHint }: { tokenTypeHint: "access_token" | "refresh_token" },
   fetchImpl: typeof fetch = globalThis.fetch,
 ): Promise<void> {
-  if (!token) return;
   if (!metadata.revocationEndpoint) {
     throw new OAuthError("OAuth server does not advertise a token revocation endpoint.");
   }

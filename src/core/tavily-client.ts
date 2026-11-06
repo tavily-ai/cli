@@ -1,4 +1,4 @@
-import { createTransport, TavilyRequestError, type TavilyTransport } from "@tavily/core";
+import { createTransport, type TavilyTransport } from "@tavily/core";
 import { sseDataLines } from "./sse.js";
 
 export type Json = Record<string, unknown>;
@@ -13,13 +13,12 @@ export interface TavilyClientLike {
   getResearch(requestId: string): Promise<Json>;
 }
 
-export interface TavilyClientOptions {
+interface TavilyClientOptions {
   apiKey?: string | undefined;
   sessionId: string;
   humanId?: string;
   clientName?: string;
   apiBaseUrl?: string;
-  env?: NodeJS.ProcessEnv;
   transport?: TavilyTransport;
 }
 
@@ -27,30 +26,19 @@ const DEFAULT_HTTP_TIMEOUT = 60;
 const SEARCH_MAX_TIMEOUT = 120;
 
 export function createTavilyClient(opts: TavilyClientOptions): TavilyClientLike {
-  const env = opts.env ?? process.env;
-  const keyless = !opts.apiKey;
+  const { TAVILY_PROJECT, TAVILY_ORG_ID } = process.env;
   const transport =
     opts.transport ??
     createTransport({
       ...(opts.apiKey ? { apiKey: opts.apiKey } : {}),
-      clientSource: keyless ? "tavily-cli-keyless" : "tavily-cli",
-      ...(opts.apiBaseUrl ? { apiBaseURL: opts.apiBaseUrl.replace(/\/+$/, "") } : {}),
+      clientSource: opts.apiKey ? "tavily-cli" : "tavily-cli-keyless",
+      ...(opts.apiBaseUrl ? { apiBaseURL: opts.apiBaseUrl } : {}),
       sessionId: opts.sessionId,
       ...(opts.humanId ? { humanId: opts.humanId } : {}),
       ...(opts.clientName ? { clientName: opts.clientName } : {}),
-      ...(env.TAVILY_PROJECT ? { projectId: env.TAVILY_PROJECT } : {}),
-      ...(env.TAVILY_ORG_ID ? { orgId: env.TAVILY_ORG_ID } : {}),
+      ...(TAVILY_PROJECT ? { projectId: TAVILY_PROJECT } : {}),
+      ...(TAVILY_ORG_ID ? { orgId: TAVILY_ORG_ID } : {}),
     });
-
-  const requireKey = (method: string): void => {
-    if (keyless) {
-      throw new TavilyRequestError({
-        status: 0,
-        body: null,
-        message: `${method}: Keyless mode only supports search and extract; provide an API key to use this method.`,
-      });
-    }
-  };
 
   /** A numeric `body.timeout` wins over the default and is also the HTTP timeout. */
   const withTimeout = (body: Json, defaultTimeout: number): { body: Json; timeout: number } => {
@@ -70,17 +58,14 @@ export function createTavilyClient(opts: TavilyClientOptions): TavilyClientLike 
       return (await transport.post("extract", r.body, { timeoutSeconds: r.timeout })) as Json;
     },
     async crawl(body) {
-      requireKey("crawl");
       const r = withTimeout(body, 150);
       return (await transport.post("crawl", r.body, { timeoutSeconds: r.timeout })) as Json;
     },
     async map(body) {
-      requireKey("map");
       const r = withTimeout(body, 150);
       return (await transport.post("map", r.body, { timeoutSeconds: r.timeout })) as Json;
     },
     async research(body) {
-      requireKey("research");
       return (await transport.post(
         "research",
         { stream: false, citation_format: "numbered", ...body },
@@ -88,7 +73,6 @@ export function createTavilyClient(opts: TavilyClientOptions): TavilyClientLike 
       )) as Json;
     },
     async researchStream(body) {
-      requireKey("researchStream");
       const chunks = await transport.stream(
         "research",
         { citation_format: "numbered", ...body, stream: true },
@@ -97,7 +81,6 @@ export function createTavilyClient(opts: TavilyClientOptions): TavilyClientLike 
       return sseDataLines(chunks);
     },
     async getResearch(requestId) {
-      requireKey("getResearch");
       return (await transport.get(`research/${encodeURIComponent(requestId)}`, {
         timeoutSeconds: DEFAULT_HTTP_TIMEOUT,
       })) as Json;

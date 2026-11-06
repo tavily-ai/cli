@@ -3,22 +3,19 @@
  * accepted by the MCP JSON-RPC endpoint, not by api.tavily.com.
  */
 import { TavilyRequestError } from "@tavily/core";
-import { sseDataLines } from "./sse.js";
+import { isObject, messageOf } from "../errors.js";
+import { dataPayload } from "./sse.js";
 import type { Json, TavilyClientLike } from "./tavily-client.js";
 
-export const MCP_URL = "https://mcp.tavily.com/mcp";
+const MCP_URL = "https://mcp.tavily.com/mcp";
 const TIMEOUT_MS = 180_000;
 
-export interface McpClientOptions {
+interface McpClientOptions {
   token: string;
   sessionId: string;
   humanId?: string;
   clientName?: string;
   fetchImpl?: typeof fetch;
-}
-
-function isObject(value: unknown): value is Json {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -47,14 +44,6 @@ function rpcError(error: unknown): Error {
   );
 }
 
-async function firstDataLine(text: string): Promise<string | undefined> {
-  const chunks = (async function* () {
-    yield text;
-  })();
-  for await (const payload of sseDataLines(chunks)) return payload;
-  return undefined;
-}
-
 function parseJson(text: string): unknown {
   try {
     return JSON.parse(text);
@@ -65,7 +54,6 @@ function parseJson(text: string): unknown {
 
 /** Unwraps the JSON-RPC result: structuredContent, then content[0].text, then the bare result. */
 function unwrapResult(data: Json): Json {
-  if ("error" in data) throw rpcError(data.error);
   const result = isObject(data.result) ? data.result : {};
   const isError = result.isError === true;
   const structured = result.structuredContent;
@@ -128,9 +116,7 @@ export function createMcpClient(opts: McpClientOptions): TavilyClientLike {
       status = resp.status;
       text = await resp.text();
     } catch (e) {
-      throw new Error(
-        `Could not reach the Tavily MCP server: ${e instanceof Error ? e.message : String(e)}`,
-      );
+      throw new Error(`Could not reach the Tavily MCP server: ${messageOf(e)}`);
     }
     if (status < 200 || status >= 300) {
       throw new TavilyRequestError({
@@ -140,24 +126,22 @@ export function createMcpClient(opts: McpClientOptions): TavilyClientLike {
       });
     }
 
-    const payload = await firstDataLine(text);
-    if (payload !== undefined) {
-      const message = parseJson(payload);
-      if (!isObject(message)) {
-        throw new TavilyRequestError({
-          status: 0,
-          body: payload,
-          message: "The Tavily MCP server returned a malformed SSE message (not a JSON object).",
-        });
-      }
-      return unwrapResult(message);
+    // The first SSE `data:` message, or with no data lines, the whole body as plain JSON.
+    const payload = text
+      .split("\n")
+      .map(dataPayload)
+      .find((p) => p !== undefined);
+    const message = parseJson(payload ?? text);
+    if (!isObject(message)) {
+      if (payload === undefined) throw new Error(`Unexpected MCP response: ${text.slice(0, 500)}`);
+      throw new TavilyRequestError({
+        status: 0,
+        body: payload,
+        message: "The Tavily MCP server returned a malformed SSE message (not a JSON object).",
+      });
     }
-
-    // No SSE data lines: the whole body may be plain JSON.
-    const data = parseJson(text);
-    if (!isObject(data)) throw new Error(`Unexpected MCP response: ${text.slice(0, 500)}`);
-    if ("error" in data) throw rpcError(data.error);
-    return (isObject(data.result) ? data.result : data) as Json;
+    if ("error" in message) throw rpcError(message.error);
+    return unwrapResult(message);
   }
 
   return {

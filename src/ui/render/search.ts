@@ -17,15 +17,11 @@ export interface SearchPrintOptions {
 
 export async function printSearchResults(data: Json, opts: SearchPrintOptions): Promise<void> {
   const maxChars = opts.maxChars ?? 600;
-  if (opts.json) {
-    emit(data, { outputFile: opts.outputFile, pretty: true });
-    return;
-  }
-  if (opts.outputFile) {
+  if (opts.json || opts.outputFile) {
     emit(data, { outputFile: opts.outputFile, pretty: true });
     // At a terminal -o only saves; elsewhere the snippets print too, so an agent can skim them and
     // read the saved file for the results worth more.
-    if (isTerminal(process.stdout)) return;
+    if (opts.json || isTerminal(process.stdout)) return;
   }
 
   const results = list<SearchResult>(data.results);

@@ -5,7 +5,7 @@ import { parseNumberArg } from "../commands/options.js";
 
 type SearchKey = keyof typeof searchParameters;
 
-export const SEARCH_FLAG_OVERRIDES: Partial<
+const SEARCH_FLAG_OVERRIDES: Partial<
   Record<SearchKey, { flag?: string; positional?: true; bareValue?: string }>
 > = {
   query: { positional: true },
@@ -14,9 +14,8 @@ export const SEARCH_FLAG_OVERRIDES: Partial<
   includeRawContent: { bareValue: "markdown" },
 };
 
-export type SearchFlagSpec = {
+type SearchFlagSpec = {
   key: SearchKey;
-  apiName: string;
   flags: string;
   description: string;
   parse: (raw: string | true) => unknown;
@@ -43,7 +42,7 @@ const PYTHON_ORDER: readonly SearchKey[] = [
 
 const kebab = (key: string) => key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
 // The regex the SDK's serializeSearchParameters uses.
-const snake = (key: string) => key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+export const snake = (key: string) => key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 
 function checkChoice(raw: string, choices: readonly string[]): string {
   if (!choices.includes(raw)) {
@@ -55,7 +54,7 @@ function checkChoice(raw: string, choices: readonly string[]): string {
 function toSpec(key: SearchKey, def: ParameterDefinition): SearchFlagSpec {
   const override = SEARCH_FLAG_OVERRIDES[key] ?? {};
   const flag = `--${override.flag ?? kebab(key)}`;
-  const base = { key, apiName: snake(key), description: def.description };
+  const base = { key, description: def.description };
 
   if (Array.isArray(def.type)) {
     // ["boolean", "string"]: an optional value; bare means `bareValue`, "true"/"false" are booleans.
@@ -141,11 +140,11 @@ export function applySearchFlags(cmd: Command): Command {
 /** The snake_case request fields for the generated options that were set. */
 export function searchBodyFromOptions(opts: Record<string, unknown>): Record<string, unknown> {
   const body: Record<string, unknown> = {};
-  for (const spec of searchFlagSpecs()) {
-    const value = opts[spec.key];
+  for (const key of Object.keys(searchParameters)) {
+    const value = opts[key];
     // An array flag with no entries (`--include-domains ""`) sends nothing, as Python's did.
     if (value === undefined || (Array.isArray(value) && value.length === 0)) continue;
-    body[spec.apiName] = value;
+    body[snake(key)] = value;
   }
   return body;
 }

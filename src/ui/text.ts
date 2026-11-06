@@ -28,10 +28,6 @@ export function isTerminal(stream: NodeJS.WriteStream = process.stdout): boolean
   return terminalOverride ?? Boolean(stream.isTTY);
 }
 
-export function terminalWidth(stream: NodeJS.WriteStream): number {
-  return stream.columns ?? 80;
-}
-
 export function safeLink(
   url: unknown,
   label?: unknown,

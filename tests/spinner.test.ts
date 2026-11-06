@@ -1,39 +1,41 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { spinner, withSpinner } from "../src/ui/spinner.js";
+import { setTerminalOverride } from "../src/ui/text.js";
 
-function fakeStream(isTTY: boolean) {
-  const writes: string[] = [];
-  const stream = {
-    isTTY,
-    write: (s: string) => writes.push(s) > 0,
-  } as unknown as NodeJS.WriteStream;
-  return { stream, writes };
-}
+let writes: string[];
 
-beforeEach(() => vi.useFakeTimers());
-afterEach(() => vi.useRealTimers());
+beforeEach(() => {
+  vi.useFakeTimers();
+  writes = [];
+  vi.spyOn(process.stderr, "write").mockImplementation((s) => writes.push(String(s)) > 0);
+});
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  setTerminalOverride(null);
+});
 
-test("non-TTY stream: no writes, withSpinner still returns the value", async () => {
-  const { stream, writes } = fakeStream(false);
-  const s = spinner("x", { enabled: true, stream });
+test("non-TTY stderr: no writes, withSpinner still returns the value", async () => {
+  setTerminalOverride(false);
+  const s = spinner("x", true);
   s.update("y");
   vi.advanceTimersByTime(500);
   s.stop();
-  expect(await withSpinner("x", { enabled: true, stream }, async () => 7)).toBe(7);
+  expect(await withSpinner("x", true, async () => 7)).toBe(7);
   expect(writes).toEqual([]);
   expect(vi.getTimerCount()).toBe(0);
 });
 
 test("disabled: no writes and no timer", () => {
-  const { stream, writes } = fakeStream(true);
-  spinner("x", { enabled: false, stream }).stop();
+  setTerminalOverride(true);
+  spinner("x", false).stop();
   expect(writes).toEqual([]);
   expect(vi.getTimerCount()).toBe(0);
 });
 
-test("TTY stream: animates frames, updates message, clears on stop", () => {
-  const { stream, writes } = fakeStream(true);
-  const s = spinner("loading", { enabled: true, stream });
+test("TTY stderr: animates frames, updates message, clears on stop", () => {
+  setTerminalOverride(true);
+  const s = spinner("loading", true);
   expect(writes[0]).toBe("\r⠋ loading");
   vi.advanceTimersByTime(80);
   expect(writes.at(-1)).toBe("\r⠙ loading");
@@ -50,9 +52,9 @@ test("TTY stream: animates frames, updates message, clears on stop", () => {
 });
 
 test("withSpinner stops the spinner and rethrows when fn rejects", async () => {
-  const { stream, writes } = fakeStream(true);
+  setTerminalOverride(true);
   await expect(
-    withSpinner("x", { enabled: true, stream }, async () => {
+    withSpinner("x", true, async () => {
       throw new Error("boom");
     }),
   ).rejects.toThrow("boom");

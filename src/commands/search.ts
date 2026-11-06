@@ -1,32 +1,19 @@
 /** tvly search — web search via the Tavily API; up to 5 queries run in parallel. */
 import { TavilyKeylessLimitError, TavilyRequestError } from "@tavily/core";
-import { type Command, InvalidArgumentError, Option } from "commander";
+import { type Command, Option } from "commander";
 import { getClientOrKeyless } from "../core/client-factory.js";
 import { applySearchFlags, searchBodyFromOptions } from "../core/search-flags.js";
 import type { Json } from "../core/tavily-client.js";
-import { ExitError } from "../errors.js";
-import { resolveOutput } from "../ui/output-file.js";
-import { printMultiSearchResults, printSearchResults } from "../ui/render.js";
+import { ExitError, messageOf } from "../errors.js";
+import { keylessCapError, printKeylessCapHit } from "../ui/keyless.js";
+import { resolveOutput } from "../ui/render/emit.js";
+import { printMultiSearchResults, printSearchResults } from "../ui/render/search.js";
 import { withSpinner } from "../ui/spinner.js";
-import {
-  addClientNameOption,
-  addOutputOption,
-  keylessCapError,
-  LIMIT_STATUSES,
-  parseNumberArg,
-  printKeylessCapHit,
-  readQueryArg,
-  resolveJson,
-  runWithApiErrors,
-} from "./shared.js";
+import { addCommonOptions, parseNumberArg, resolveJson } from "./options.js";
+import { LIMIT_STATUSES, QUERY_REQUIRED, readQueryArg, runWithApiErrors } from "./shared.js";
 
 const MAX_QUERIES = 5;
 const DEFAULT_CHARS = 600;
-
-export interface SearchDeps {
-  getClientOrKeyless?: typeof getClientOrKeyless;
-  readStdin?: () => string;
-}
 
 interface SearchOptions extends Record<string, unknown> {
   maxChars?: number;
@@ -43,64 +30,42 @@ export function configure(cmd: Command): void {
       "Characters of each result's content to print (default 600, shared across queries: 300 each for 2, 200 for 3); 0 prints it whole. --json and -o files keep it whole.",
     ).argParser((raw: string) => parseNumberArg(raw, { integer: true, minimum: 0 })),
   );
-  addOutputOption(cmd);
-  addClientNameOption(cmd);
+  addCommonOptions(cmd);
 }
 
-function readQueries(args: string[], readStdin: (() => string) | undefined): string[] {
+function readQueries(args: string[], cmd: Command): string[] {
   const queries =
-    args.length === 1 && args[0] === "-"
-      ? [readQueryArg("-", readStdin)]
-      : args.filter((q) => q.trim());
-  if (queries.length === 0) {
-    throw new InvalidArgumentError(
-      "QUERY is required. Pass a query string or use '-' to read from stdin.",
-    );
-  }
+    args.length === 1 && args[0] === "-" ? [readQueryArg("-", cmd)] : args.filter((q) => q.trim());
+  if (queries.length === 0) cmd.error(QUERY_REQUIRED);
   if (queries.length > MAX_QUERIES) {
-    throw new InvalidArgumentError(
-      `At most ${MAX_QUERIES} queries per command, got ${queries.length}.`,
-    );
+    cmd.error(`error: At most ${MAX_QUERIES} queries per command, got ${queries.length}.`);
   }
   return queries;
 }
 
-export async function run(
-  args: string[],
-  opts: SearchOptions,
-  cmd: Command,
-  deps: SearchDeps = {},
-): Promise<void> {
+export async function run(args: string[], opts: SearchOptions, cmd: Command): Promise<void> {
   const json = resolveJson(cmd);
-  let queries: string[];
-  try {
-    queries = readQueries(args, deps.readStdin);
-  } catch (e) {
-    if (e instanceof InvalidArgumentError) cmd.error(`error: ${e.message}`);
-    throw e;
-  }
+  const queries = readQueries(args, cmd);
   const outputFile = resolveOutput(opts.output, "search", queries[0]);
   // One search's worth of text per command, however many queries it holds.
   const maxChars = opts.maxChars ?? Math.floor(DEFAULT_CHARS / queries.length);
   const body = searchBodyFromOptions(opts);
-  const resolveClient = deps.getClientOrKeyless ?? getClientOrKeyless;
-  const spin = { enabled: !json };
 
   if (queries.length === 1) {
     const response = await runWithApiErrors(json, async () => {
-      const { client } = await resolveClient({ clientName: opts.clientName });
-      return withSpinner("Searching...", spin, () => client.search({ query: queries[0], ...body }));
+      const client = await getClientOrKeyless(opts.clientName);
+      return withSpinner("Searching...", !json, () =>
+        client.search({ query: queries[0], ...body }),
+      );
     });
     await printSearchResults(response, { json, outputFile, maxChars });
     return;
   }
 
-  const { client } = await runWithApiErrors(json, () =>
-    resolveClient({ clientName: opts.clientName }),
-  );
+  const client = await runWithApiErrors(json, () => getClientOrKeyless(opts.clientName));
   const capHits: TavilyKeylessLimitError[] = [];
   let limitHit = false;
-  const responses = await withSpinner("Searching...", spin, () =>
+  const responses = await withSpinner("Searching...", !json, () =>
     Promise.all(
       queries.map(async (query): Promise<Json> => {
         try {
@@ -112,7 +77,7 @@ export async function run(
             return { query, error: keylessCapError(e) };
           }
           if (e instanceof TavilyRequestError && LIMIT_STATUSES.has(e.status)) limitHit = true;
-          return { query, error: e instanceof Error ? e.message : String(e) };
+          return { query, error: messageOf(e) };
         }
       }),
     ),

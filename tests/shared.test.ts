@@ -2,22 +2,18 @@ import path from "node:path";
 import { TavilyKeylessLimitError, TavilyRequestError } from "@tavily/core";
 import { Command } from "commander";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { handleOauthRefreshError } from "../src/commands/common.js";
+import { addClientNameOption, addOutputOption, resolveJson } from "../src/commands/options.js";
 import {
-  addClientNameOption,
-  addOutputOption,
   handleApiError,
-  handleKeylessCapHit,
-  handleOauthRefreshError,
-  keylessCapError,
-  printKeylessCapHit,
   readQueryArg,
-  resolveJson,
   runWithApiErrors,
   splitCsv,
 } from "../src/commands/shared.js";
 import { authSource } from "../src/core/config.js";
 import { ExitError, OAuthError } from "../src/errors.js";
-import { resolveOutput } from "../src/ui/output-file.js";
+import { keylessCapError, printKeylessCapHit } from "../src/ui/keyless.js";
+import { resolveOutput } from "../src/ui/render/emit.js";
 
 const ANSI = new RegExp(
   `${String.fromCharCode(27)}(\\[[0-9;]*m|\\]8;;[^${String.fromCharCode(27)}]*${String.fromCharCode(27)}\\\\)`,
@@ -119,10 +115,14 @@ test("keylessCapError maps SDK fields, including window, in the Python key order
   });
 });
 
-test("handleKeylessCapHit JSON and human modes exit 3", () => {
-  expect(exitCode(() => handleKeylessCapHit(capError(), true))).toBe(3);
+test("a keyless cap hit in runWithApiErrors exits 3 in JSON and human modes", async () => {
+  const hit = (json: boolean) =>
+    runWithApiErrors(json, async () => {
+      throw capError();
+    }).catch((e: ExitError) => e.code);
+  expect(await hit(true)).toBe(3);
   expect(JSON.parse(stdout.join(""))).toEqual({ error: keylessCapError(capError()) });
-  expect(exitCode(() => handleKeylessCapHit(capError(), false))).toBe(3);
+  expect(await hit(false)).toBe(3);
   const text = strip(stderr.join(""));
   expect(text).toContain("  > Tavily rate limit reached.");
   expect(text).toContain("    Retry after: 1h (3600s)");
@@ -202,15 +202,14 @@ test("splitCsv", () => {
   expect(splitCsv("a.com, b.com")).toEqual(["a.com", "b.com"]);
 });
 
-test("readQueryArg", () => {
-  expect(readQueryArg("hello")).toBe("hello");
-  expect(readQueryArg("-", () => "  from stdin\n")).toBe("from stdin");
-  for (const q of [undefined, "", "-"]) {
-    expect(() => readQueryArg(q, () => "  ")).toThrow(
-      "QUERY is required. Pass a query string or use '-' to read from stdin.",
+test("readQueryArg (stdin cases are in research.test.ts)", () => {
+  const cmd = new Command().exitOverride().configureOutput({ writeErr: () => {} });
+  expect(readQueryArg(" hello ", cmd)).toBe("hello");
+  for (const q of [undefined, "", "  "]) {
+    expect(() => readQueryArg(q, cmd)).toThrow(
+      "error: QUERY is required. Pass a query string or use '-' to read from stdin.",
     );
   }
-  expect(readQueryArg("-", () => "x".repeat(200_000))).toHaveLength(100_000);
 });
 
 test("resolveOutput", () => {

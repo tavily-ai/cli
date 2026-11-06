@@ -1,15 +1,15 @@
 import { createInterface } from "node:readline/promises";
 import { type Command, CommanderError } from "commander";
-import { handleOauthRefreshError } from "./commands/shared.js";
-import { authSource, getApiKey } from "./core/config.js";
-import { ExitError, OAuthError } from "./errors.js";
+import { getApiKeyOrExit } from "./commands/common.js";
+import { authSource } from "./core/config.js";
+import { ExitError, messageOf } from "./errors.js";
 import { buildProgram } from "./program.js";
 import { sanitizeControl } from "./ui/text.js";
 import { colorEnabled, colors, LOGO } from "./ui/theme.js";
 import { splitShellWords } from "./util/shell-words.js";
 import { VERSION } from "./version.js";
 
-export interface ReplOptions {
+interface ReplOptions {
   input?: NodeJS.ReadableStream & { isTTY?: boolean; setRawMode?: (mode: boolean) => unknown };
   output?: NodeJS.WritableStream & { columns?: number };
   program?: () => Command;
@@ -23,13 +23,7 @@ async function printBanner(
   say: (line?: string) => void,
   opts: Pick<ReplOptions, "home" | "env">,
 ): Promise<void> {
-  let key: string | null = null;
-  try {
-    key = await getApiKey(opts);
-  } catch (e) {
-    if (e instanceof OAuthError) handleOauthRefreshError(e, false);
-    throw e;
-  }
+  const key = await getApiKeyOrExit(false, opts);
 
   say(LOGO);
   say(`  ${colors.dim(`v${VERSION}`)}`);
@@ -177,9 +171,7 @@ export async function runRepl(opts: ReplOptions = {}): Promise<void> {
       try {
         args = splitShellWords(line);
       } catch (e) {
-        say(
-          `  ${colors.pink("Parse error:")} ${sanitizeControl(e instanceof Error ? e.message : e)}`,
-        );
+        say(`  ${colors.pink("Parse error:")} ${sanitizeControl(messageOf(e))}`);
         continue;
       }
       if (args[0] === "tvly") args = args.slice(1);
@@ -203,9 +195,7 @@ export async function runRepl(opts: ReplOptions = {}): Promise<void> {
         } else if (e instanceof CommanderError) {
           if (e.exitCode !== 0) say(`  ${colors.pink(">")} ${sanitizeControl(e.message)}`);
         } else {
-          say(
-            `  ${colors.pink("> Error:")} ${sanitizeControl(e instanceof Error ? e.message : e)}`,
-          );
+          say(`  ${colors.pink("> Error:")} ${sanitizeControl(messageOf(e))}`);
         }
       } finally {
         if ((input as { readableEnded?: boolean }).readableEnded) closed = true;

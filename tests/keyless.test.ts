@@ -1,5 +1,20 @@
+import { type TavilyContinuationPath, TavilyKeylessLimitError } from "@tavily/core";
 import { expect, test } from "vitest";
 import { formatKeylessEnvelopeForTerminal, formatSeconds } from "../src/ui/keyless.js";
+
+const capHit = (fields: {
+  message?: string;
+  retryAfter?: number | null;
+  continuationPaths?: TavilyContinuationPath[];
+}) =>
+  new TavilyKeylessLimitError({
+    message: "",
+    capType: "hourly",
+    retryAfter: null,
+    bonusEligible: false,
+    continuationPaths: [],
+    ...fields,
+  });
 
 test("formatSeconds", () => {
   expect(formatSeconds(45)).toBe("45s");
@@ -12,21 +27,23 @@ test("formatSeconds", () => {
 });
 
 test("envelope with signup, payment, and bonus actions", () => {
-  const block = formatKeylessEnvelopeForTerminal({
-    message: "  Hourly cap reached.  ",
-    retryAfterSeconds: 90,
-    nextActions: [
-      { type: "signup", url: "https://app.tavily.com" },
-      { type: "agentic_payment", scheme: "x402", details: "pay here" },
-      {
-        type: "bonus_credits",
-        eligible: true,
-        credits_on_completion: 50,
-        questions: ["Who are you?", "What do you build?"],
-        endpoint: "/v1/keyless/bonus",
-      },
-    ],
-  });
+  const block = formatKeylessEnvelopeForTerminal(
+    capHit({
+      message: "  Hourly cap reached.  ",
+      retryAfter: 90,
+      continuationPaths: [
+        { type: "signup", url: "https://app.tavily.com" },
+        { type: "agentic_payment", scheme: "x402", details: "pay here" },
+        {
+          type: "bonus_credits",
+          eligible: true,
+          credits_on_completion: 50,
+          questions: ["Who are you?", "What do you build?"],
+          endpoint: "/v1/keyless/bonus",
+        },
+      ],
+    }),
+  );
   expect(block.split("\n")).toEqual([
     "Tavily rate limit reached.",
     "Hourly cap reached.",
@@ -44,16 +61,19 @@ test("envelope with signup, payment, and bonus actions", () => {
 });
 
 test("envelope defaults, ineligible bonus, and empty input", () => {
-  expect(formatKeylessEnvelopeForTerminal({})).toBe("Tavily rate limit reached.");
-  const block = formatKeylessEnvelopeForTerminal({
-    retryAfterSeconds: 0,
-    nextActions: [
-      { type: "signup" },
-      { type: "agentic_payment" },
-      { type: "bonus_credits", eligible: false, questions: ["q"] },
-      "junk",
-    ],
-  });
+  expect(formatKeylessEnvelopeForTerminal(capHit({}))).toBe("Tavily rate limit reached.");
+  const block = formatKeylessEnvelopeForTerminal(
+    capHit({
+      retryAfter: 0,
+      continuationPaths: [
+        { type: "signup" },
+        { type: "agentic_payment" },
+        { type: "bonus_credits", eligible: false, questions: ["q"] },
+        // The SDK passes envelope entries through unchecked.
+        "junk" as unknown as TavilyContinuationPath,
+      ],
+    }),
+  );
   expect(block.split("\n")).toEqual([
     "Tavily rate limit reached.",
     "",
@@ -61,9 +81,9 @@ test("envelope defaults, ineligible bonus, and empty input", () => {
     "  - Sign up for a Tavily API key:  https://tavily.com",
     "  - Pay via x402 agentic payment:  TBD",
   ]);
-  const bonus = formatKeylessEnvelopeForTerminal({
-    nextActions: [{ type: "bonus_credits", eligible: true, questions: ["only"] }],
-  });
+  const bonus = formatKeylessEnvelopeForTerminal(
+    capHit({ continuationPaths: [{ type: "bonus_credits", eligible: true, questions: ["only"] }] }),
+  );
   expect(bonus).toContain("  - Earn bonus credits by answering 1 question:");
   expect(bonus).toContain("    POST your answers to: /v1/keyless/bonus");
 });

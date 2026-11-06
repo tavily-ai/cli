@@ -1,7 +1,7 @@
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { CommanderError } from "commander";
-import { ExitError } from "./errors.js";
+import { ExitError, messageOf } from "./errors.js";
 import { buildProgram } from "./program.js";
 import { sanitizeControl } from "./ui/text.js";
 
@@ -12,7 +12,7 @@ export async function main(argv: string[]): Promise<number> {
   } catch (err) {
     if (err instanceof ExitError) return err.code;
     if (err instanceof CommanderError) return err.exitCode === 0 ? 0 : 2;
-    console.error(`  > Error: ${sanitizeControl(err instanceof Error ? err.message : err)}`);
+    console.error(`  > Error: ${sanitizeControl(messageOf(err))}`);
     return 1;
   }
 }

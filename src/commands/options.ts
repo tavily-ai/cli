@@ -1,4 +1,5 @@
-/** Option helpers that load only commander, so the CLI entry point stays free of the SDK. */
+/** Option and prompt helpers that load only commander and readline, so the CLI entry point stays free of the SDK. */
+import { createInterface } from "node:readline/promises";
 import { type Command, InvalidArgumentError, Option } from "commander";
 
 /** `--json` anywhere up the command chain. */
@@ -24,6 +25,11 @@ export function addOutputOption(cmd: Command): Command {
   );
 }
 
+/** `-o, --output` then `--client-name`, the pair every API command takes. */
+export function addCommonOptions(cmd: Command): Command {
+  return addClientNameOption(addOutputOption(cmd));
+}
+
 /** Parse a numeric option value; bounds errors name the `minimum <n>` / `maximum <n>` they break. */
 export function parseNumberArg(
   raw: string,
@@ -39,4 +45,15 @@ export function parseNumberArg(
     throw new InvalidArgumentError(`${n} is above the maximum ${opts.maximum}.`);
   }
   return n;
+}
+
+/** Ask `question [Y/n]`; an empty answer means yes. */
+export async function promptConfirm(question: string): Promise<boolean> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = (await rl.question(`${question} [Y/n]: `)).trim().toLowerCase();
+    return answer === "" || answer === "y" || answer === "yes";
+  } finally {
+    rl.close();
+  }
 }

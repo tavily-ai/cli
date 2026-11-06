@@ -3,10 +3,11 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { isObject } from "../errors.js";
 
 type Sessions = Record<string, string>;
 
-export interface GrandparentOptions {
+interface GrandparentOptions {
   spawnSync?: typeof childProcess.spawnSync;
   platform?: NodeJS.Platform;
   readFile?: (p: string) => string;
@@ -77,7 +78,7 @@ export function grandparentPid(ppid: number, opts: GrandparentOptions = {}): num
 function readSessions(file: string): Sessions {
   try {
     const data: unknown = JSON.parse(readFileSync(file, "utf8"));
-    return data && typeof data === "object" && !Array.isArray(data) ? (data as Sessions) : {};
+    return isObject(data) ? (data as Sessions) : {};
   } catch {
     return {};
   }

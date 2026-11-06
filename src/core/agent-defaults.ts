@@ -3,9 +3,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { InvalidArgumentError } from "commander";
+import { isObject } from "../errors.js";
 
-export const CLAUDE_DENIED_TOOLS = ["WebSearch", "WebFetch"];
-export const CODEX_WEB_SEARCH_LINE = 'web_search = "disabled"';
+const CLAUDE_DENIED_TOOLS = ["WebSearch", "WebFetch"];
+const CODEX_WEB_SEARCH_LINE = 'web_search = "disabled"';
 
 const TOML_TABLE_HEADER = /^\s*\[/;
 const TOML_WEB_SEARCH = /^\s*web_search\s*=/;
@@ -43,9 +44,6 @@ export function codexConfigPath(ctx: PathContext = {}): string {
 // -- Claude Code: ~/.claude/settings.json --
 
 type Settings = Record<string, unknown>;
-
-const isObject = (v: unknown): v is Settings =>
-  typeof v === "object" && v !== null && !Array.isArray(v);
 
 function loadClaudeSettings(path: string): Settings {
   if (!existsSync(path)) return {};

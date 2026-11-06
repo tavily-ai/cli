@@ -11,7 +11,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import lockfile from "proper-lockfile";
-import { OAuthError } from "../errors.js";
+import { isObject, messageOf, OAuthError } from "../errors.js";
 import {
   fetchMetadata,
   MCP_ISSUER,
@@ -31,7 +31,6 @@ export interface ConfigOptions {
 }
 
 export interface ClearCredentialsResult {
-  localCredentialsCleared: true;
   serverRevoked: boolean | null;
   revocationError?: string;
 }
@@ -41,21 +40,12 @@ export function configPaths(home?: string) {
   return {
     dir,
     file: path.join(dir, "config.json"),
-    sessionFile: path.join(dir, "session.json"),
     mcpAuthDir: path.join(home ?? homedir(), ".mcp-auth"),
   };
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value !== "";
-}
-
-function errorMessage(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
 }
 
 export function readConfig(opts: ConfigOptions = {}): Config {
@@ -100,7 +90,6 @@ async function writeConfigUnlocked(config: Config, opts: ConfigOptions): Promise
     }
     await chmod(temp, 0o600);
     await fs.rename(temp, file);
-    await chmod(file, 0o600);
   } finally {
     await fs.rm(temp, { force: true });
   }
@@ -159,10 +148,6 @@ function withoutKeys(config: Config, ...keys: string[]): Config {
   return copy;
 }
 
-function withRefreshedSession(config: Config, session: OAuthSession): Config {
-  return { ...withoutKeys(config, "api_key"), oauth: oauthSessionData(session) };
-}
-
 /** Replace stored credentials with an API key, revoking old OAuth first (best effort). */
 export async function saveApiKey(apiKey: string, opts: ConfigOptions = {}): Promise<void> {
   await withConfigLock(async (config) => {
@@ -208,17 +193,6 @@ export async function saveOauthSession(
   }, opts);
 }
 
-/** Persist refreshed tokens for the active session without revoking it. */
-export async function saveRefreshedOauthSession(
-  session: OAuthSession,
-  opts: ConfigOptions = {},
-): Promise<void> {
-  await withConfigLock(
-    async (config) => ({ config: withRefreshedSession(config, session), result: undefined }),
-    opts,
-  );
-}
-
 /** True when ~/.tavily/config.json holds a native OAuth session. */
 export function hasStoredOauth(opts: ConfigOptions = {}): boolean {
   const data = readConfig(opts).oauth;
@@ -244,7 +218,7 @@ export function getApiBaseUrl(opts: ConfigOptions = {}): string | null {
 
 export async function clearCredentials(opts: ConfigOptions = {}): Promise<ClearCredentialsResult> {
   const result = await withConfigLock(async (config) => {
-    const outcome: ClearCredentialsResult = { localCredentialsCleared: true, serverRevoked: null };
+    const outcome: ClearCredentialsResult = { serverRevoked: null };
     if (isObject(config.oauth)) {
       try {
         if (await revokeStoredOauth(config.oauth, opts)) outcome.serverRevoked = true;
@@ -390,13 +364,15 @@ async function oauthAccessToken(config: Config, opts: ConfigOptions): Promise<st
       refresh,
       opts.fetchImpl,
     );
-    await writeConfigUnlocked(withRefreshedSession(config, { tokens, client }), opts);
+    // The refreshed session replaces the stored one without revoking it.
+    const oauth = oauthSessionData({ tokens, client });
+    await writeConfigUnlocked({ ...withoutKeys(config, "api_key"), oauth }, opts);
     return tokens.accessToken;
   } catch (e) {
     throw new OAuthError(
       "Could not refresh the stored Tavily OAuth session. " +
         "The stored credentials were not removed; retry the command, and run `tvly login` only if it continues. " +
-        `Details: ${errorMessage(e)}`,
+        `Details: ${messageOf(e)}`,
     );
   }
 }
@@ -425,6 +401,16 @@ export async function getApiKey(opts: ConfigOptions = {}): Promise<string | null
 /** True for an MCP OAuth JWT (as opposed to a tvly-* API key). */
 export function isOauthToken(key: string): boolean {
   return !key.startsWith("tvly-") && decodeJwtPayload(key) !== null;
+}
+
+/** How `key`, as `getApiKey` resolved it, was found. */
+export function authMethod(
+  key: string,
+  opts: ConfigOptions = {},
+): "env" | "oauth" | "oauth_legacy" | "api_key" {
+  if ((opts.env ?? process.env).TAVILY_API_KEY) return "env";
+  if (isOauthToken(key)) return hasStoredOauth(opts) ? "oauth" : "oauth_legacy";
+  return "api_key";
 }
 
 /** Describe how the user is authenticated. */

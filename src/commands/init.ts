@@ -3,14 +3,12 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { createInterface } from "node:readline/promises";
 import type { Command } from "commander";
 import { getClientOrKeyless } from "../core/client-factory.js";
 import {
+  authMethod,
   type ConfigOptions,
   getApiKey,
-  hasStoredOauth,
-  isOauthToken,
   saveApiKey,
   saveOauthSession,
 } from "../core/config.js";
@@ -27,14 +25,14 @@ import {
   installAgentSkills,
   SKILLS_REPO,
   type SkillsInstallResult,
-  whichOnPath,
 } from "../core/skills.js";
 import type { TavilyClientLike } from "../core/tavily-client.js";
-import { ExitError } from "../errors.js";
+import { ExitError, messageOf } from "../errors.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
+import { whichOnPath } from "../util/process.js";
 import { VERSION } from "../version.js";
-import { resolveJson } from "./shared.js";
+import { promptConfirm, resolveJson } from "./options.js";
 
 export interface InitDeps extends ConfigOptions {
   login?: typeof runBrowserLogin;
@@ -68,16 +66,6 @@ interface InitResult {
   verification: { cli: boolean; auth: boolean; live_search: boolean };
   install: { global: boolean; manager: string | null; on_path: boolean; path_updated: boolean };
   error?: { stage: string; message: string };
-}
-
-async function promptConfirm(question: string): Promise<boolean> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const answer = (await rl.question(`${question} [Y/n]: `)).trim().toLowerCase();
-    return answer === "" || answer === "y" || answer === "yes";
-  } finally {
-    rl.close();
-  }
 }
 
 export async function run(opts: InitOptions, cmd: Command, deps: InitDeps = {}): Promise<void> {
@@ -252,8 +240,6 @@ async function fixPath(
   return null;
 }
 
-const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-
 async function selectAgents(
   requested: string[],
   opts: InitOptions,
@@ -277,14 +263,9 @@ async function ensureAuth(
   opts: InitOptions,
   deps: InitDeps,
 ): Promise<{ authenticated: boolean; method: string }> {
-  const config: ConfigOptions = {
-    ...(deps.home !== undefined ? { home: deps.home } : {}),
-    ...(deps.env !== undefined ? { env: deps.env } : {}),
-    ...(deps.fetchImpl !== undefined ? { fetchImpl: deps.fetchImpl } : {}),
-  };
-  if (opts.apiKey) await saveApiKey(opts.apiKey, config);
-  const key = await getApiKey(config);
-  if (key) return { authenticated: true, method: authMethod(key, config) };
+  if (opts.apiKey) await saveApiKey(opts.apiKey, deps);
+  const key = await getApiKey(deps);
+  if (key) return { authenticated: true, method: authMethod(key, deps) };
   if (opts.skipAuth) return { authenticated: false, method: "none" };
 
   const isTTY = deps.stdinIsTTY ?? process.stdin.isTTY === true;
@@ -301,19 +282,12 @@ async function ensureAuth(
     ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
     ...(deps.openImpl ? { openImpl: deps.openImpl } : {}),
   });
-  await saveOauthSession(session, config);
+  await saveOauthSession(session, deps);
   return { authenticated: true, method: "oauth" };
 }
 
-function authMethod(key: string, config: ConfigOptions): string {
-  if ((config.env ?? process.env).TAVILY_API_KEY) return "env";
-  if (isOauthToken(key)) return hasStoredOauth(config) ? "oauth" : "oauth_legacy";
-  return "api_key";
-}
-
 async function verifyLiveSearch(deps: InitDeps): Promise<boolean> {
-  const client =
-    deps.client ?? (await getClientOrKeyless({ clientName: "tavily-cli-init" })).client;
+  const client = deps.client ?? (await getClientOrKeyless("tavily-cli-init"));
   const response = await client.search({ query: "Tavily Search API", max_results: 1 });
   return Array.isArray((response as { results?: unknown } | null)?.results);
 }

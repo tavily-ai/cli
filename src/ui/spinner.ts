@@ -3,18 +3,14 @@ import { isTerminal } from "./text.js";
 const FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 const INTERVAL_MS = 80;
 
-export interface SpinnerOptions {
-  enabled: boolean;
-  stream?: NodeJS.WriteStream;
-}
-
-/** Callers must sanitize `message` (sanitizeControl) if it contains untrusted text. */
+/** A stderr spinner, drawn only when `enabled` and stderr is a terminal. Callers must sanitize
+ * `message` (sanitizeControl) if it contains untrusted text. */
 export function spinner(
   message: string,
-  opts: SpinnerOptions,
+  enabled: boolean,
 ): { update(message: string): void; stop(): void } {
-  const stream = opts.stream ?? process.stderr;
-  if (!opts.enabled || !isTerminal(stream)) return { update() {}, stop() {} };
+  const stream = process.stderr;
+  if (!enabled || !isTerminal(stream)) return { update() {}, stop() {} };
 
   let frame = 0;
   const draw = () => stream.write(`\r${FRAMES[frame++ % FRAMES.length]} ${message}`);
@@ -36,10 +32,10 @@ export function spinner(
 
 export async function withSpinner<T>(
   message: string,
-  opts: SpinnerOptions,
+  enabled: boolean,
   fn: () => Promise<T>,
 ): Promise<T> {
-  const s = spinner(message, opts);
+  const s = spinner(message, enabled);
   try {
     return await fn();
   } finally {

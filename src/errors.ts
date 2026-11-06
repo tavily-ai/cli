@@ -12,3 +12,13 @@ export class OAuthError extends Error {
     this.name = "OAuthError";
   }
 }
+
+/** A non-null, non-array object, such as parsed JSON's `{...}`. */
+export function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** An Error's message, or the thrown value as a string. */
+export function messageOf(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}

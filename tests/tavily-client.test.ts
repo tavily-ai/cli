@@ -39,14 +39,16 @@ function client(apiKey?: string) {
 
 test("clientSource, apiBaseUrl and ids are passed to createTransport", () => {
   const mocked = vi.mocked(createTransport);
+  vi.stubEnv("TAVILY_PROJECT", "p");
+  vi.stubEnv("TAVILY_ORG_ID", "o");
   createTavilyClient({
     apiKey: "k",
     sessionId: "s",
     humanId: "h",
     clientName: "n",
-    apiBaseUrl: "https://x.test/",
-    env: { TAVILY_PROJECT: "p", TAVILY_ORG_ID: "o" },
+    apiBaseUrl: "https://x.test",
   });
+  vi.unstubAllEnvs();
   expect(mocked.mock.calls[0]?.[0]).toMatchObject({
     apiKey: "k",
     clientSource: "tavily-cli",
@@ -57,20 +59,8 @@ test("clientSource, apiBaseUrl and ids are passed to createTransport", () => {
     projectId: "p",
     orgId: "o",
   });
-  createTavilyClient({ sessionId: "s", env: {} });
+  createTavilyClient({ sessionId: "s" });
   expect(mocked.mock.calls[1]?.[0]).toMatchObject({ clientSource: "tavily-cli-keyless" });
-});
-
-test("keyless refusals", async () => {
-  const { c, calls } = client();
-  await expect(c.crawl({ url: "u" })).rejects.toThrow(
-    /^crawl: Keyless mode only supports search and extract/,
-  );
-  await expect(c.getResearch("a")).rejects.toThrow(/^getResearch: Keyless/);
-  await expect(c.researchStream({ input: "i" })).rejects.toThrow(/^researchStream: Keyless/);
-  expect(calls).toEqual([]);
-  await c.search({ query: "q" });
-  expect(calls).toHaveLength(1);
 });
 
 test("default timeouts and body defaults", async () => {

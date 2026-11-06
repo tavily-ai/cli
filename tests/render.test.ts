@@ -2,14 +2,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import {
-  echoPages,
-  emit,
-  footer,
-  printExtractResults,
-  printMultiSearchResults,
-  printSearchResults,
-} from "../src/ui/render.js";
+import { echoPages, emit, footer } from "../src/ui/render/emit.js";
+import { printExtractResults } from "../src/ui/render/extract.js";
+import { printMultiSearchResults, printSearchResults } from "../src/ui/render/search.js";
 import { setTerminalOverride } from "../src/ui/text.js";
 import { captureOutput, visible } from "./helpers/capture.js";
 
@@ -196,4 +191,18 @@ test("footer centres the count and response time in a dim rule", () => {
   const text = visible(io.stdout());
   expect(text.startsWith("\n─")).toBe(true);
   expect(text).toContain(" 3 results | 1.23s ");
+});
+
+test("footer spans the terminal width, 80 columns when unknown", () => {
+  const columns = process.stdout.columns;
+  try {
+    process.stdout.columns = undefined as unknown as number;
+    footer(1, "URLs");
+    process.stdout.columns = 120;
+    footer(1, "URLs");
+  } finally {
+    process.stdout.columns = columns;
+  }
+  const rules = visible(io.stdout()).split("\n").filter(Boolean);
+  expect(rules.map((r) => r.length)).toEqual([80, 120]);
 });

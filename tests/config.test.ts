@@ -27,7 +27,6 @@ import {
   revokeStoredOauth,
   saveApiKey,
   saveOauthSession,
-  saveRefreshedOauthSession,
   withConfigLock,
 } from "../src/core/config.js";
 import { expiresAtFromNow, type OAuthSession } from "../src/core/oauth.js";
@@ -132,9 +131,13 @@ test("stored oauth revokes refresh before access", async () => {
 
 test("stored oauth without tokens is not revoked; incomplete client raises", async () => {
   const server = fakeServer();
-  expect(await revokeStoredOauth({ client_id: "cid" }, { fetchImpl: server.fetchImpl })).toBe(
-    false,
-  );
+  // Empty tokens are never sent for revocation.
+  expect(
+    await revokeStoredOauth(
+      { client_id: "cid", access_token: "", refresh_token: "" },
+      { fetchImpl: server.fetchImpl },
+    ),
+  ).toBe(false);
   await expect(
     revokeStoredOauth({ access_token: "a" }, { fetchImpl: server.fetchImpl }),
   ).rejects.toThrow(
@@ -167,7 +170,6 @@ test("clear credentials reports revocation failure but clears disk", async () =>
 
   const result = await clearCredentials({ ...opts, fetchImpl: server.fetchImpl });
 
-  expect(result.localCredentialsCleared).toBe(true);
   expect(result.serverRevoked).toBe(false);
   expect(result.revocationError).toBe(
     "refresh_token: Token revocation failed (HTTP 500).; access_token: Token revocation failed (HTTP 500).",
@@ -180,11 +182,11 @@ test("clear credentials revokes, deletes an emptied config, and reports success"
   await writeConfig({ api_key: "tvly-x", oauth: previousOauth });
   const server = fakeServer({ revoke: ok });
   const result = await clearCredentials({ ...opts, fetchImpl: server.fetchImpl });
-  expect(result).toEqual({ localCredentialsCleared: true, serverRevoked: true });
+  expect(result).toEqual({ serverRevoked: true });
   expect(readdirSync(configPaths(home).dir)).not.toContain("config.json");
 
   const again = await clearCredentials({ ...opts, fetchImpl: server.fetchImpl });
-  expect(again).toEqual({ localCredentialsCleared: true, serverRevoked: null });
+  expect(again).toEqual({ serverRevoked: null });
 });
 
 test("save api key still saves when revoking the previous oauth fails", async () => {
@@ -278,6 +280,8 @@ test("save oauth session reports when the replacement cleanup also fails", async
 
 test("malformed expiry refreshes without revoking active session", async () => {
   await writeConfig({
+    api_key: "",
+    human_id: "h",
     oauth: {
       access_token: "old-access",
       refresh_token: "same-refresh",
@@ -304,6 +308,9 @@ test("malformed expiry refreshes without revoking active session", async () => {
   expect(stored.refresh_token).toBe("same-refresh");
   expect(stored.client_id).toBe("same-client");
   expect(server.revoked()).toEqual([]);
+  // The rewrite drops the (empty) api_key and keeps unrelated fields.
+  expect(readConfig(opts)).not.toHaveProperty("api_key");
+  expect(readConfig(opts).human_id).toBe("h");
 });
 
 test("malformed expiry without refresh is invalid", async () => {
@@ -473,26 +480,6 @@ test("getApiKey with an unwritable HOME and no env key resolves keyless instead 
   expect(await getApiKey({ home: fileHome, env: {} })).toBeNull();
 });
 
-test("saving a refreshed session never revokes and drops api_key", async () => {
-  await writeConfig({ api_key: "tvly-x", human_id: "h", oauth: previousOauth });
-  const server = fakeServer();
-  await saveRefreshedOauthSession(replacementSession, { ...opts, fetchImpl: server.fetchImpl });
-  expect(server.calls).toEqual([]);
-  expect(readConfig(opts)).toEqual({
-    human_id: "h",
-    oauth: {
-      access_token: "new-access",
-      refresh_token: "new-refresh",
-      expires_at: replacementSession.tokens.expiresAt,
-      token_type: "Bearer",
-      client_id: "new-client",
-      client_secret: null,
-      token_endpoint_auth_method: "none",
-      redirect_uri: "http://127.0.0.1:2/callback",
-    },
-  });
-});
-
 test("reading a Python-written config returns its unexpired access token", async () => {
   mkdirSync(configPaths(home).dir, { recursive: true });
   copyFileSync(FIXTURE, configPaths(home).file);
@@ -506,6 +493,15 @@ test.skipIf(process.platform === "win32")("config file is 0600 and directory 070
   await saveApiKey("tvly-x", opts);
   const { dir, file } = configPaths(home);
   expect(statSync(dir).mode & 0o777).toBe(0o700);
+  expect(statSync(file).mode & 0o777).toBe(0o600);
+  // A umask that strips the owner's write bit still ends at 0600 (the temp file is chmodded
+  // before the rename, which keeps its mode).
+  const previous = process.umask(0o277);
+  try {
+    await saveApiKey("tvly-y", opts);
+  } finally {
+    process.umask(previous);
+  }
   expect(statSync(file).mode & 0o777).toBe(0o600);
 });
 

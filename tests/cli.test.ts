@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
@@ -104,29 +104,39 @@ test("--help lists every command and the setup hint", async () => {
   expect(stdout).toContain("First-time setup: tvly init");
 });
 
-test("dist/cli.js statically reaches no SDK, axios, lockfile, or markdown chunk", () => {
-  const dist = new URL("../dist/", import.meta.url);
+const dist = new URL("../dist/", import.meta.url);
+
+/** Assert that `entry` and every chunk it statically imports contain none of `banned`. */
+function expectStaticGraphFree(entry: string, banned: string[]): Set<string> {
   const seen = new Set<string>();
-  const queue = ["cli.js"];
+  const queue = [entry];
   while (queue.length > 0) {
     const file = queue.pop() as string;
     if (seen.has(file)) continue;
     seen.add(file);
     const src = readFileSync(new URL(file, dist), "utf8");
-    for (const banned of [
-      'from "@tavily/core',
-      'from "axios"',
-      'from "proper-lockfile"',
-      'from "marked',
-    ]) {
-      expect(src, `${file} contains ${banned}`).not.toContain(banned);
-    }
+    for (const b of banned) expect(src, `${file} (from ${entry}) contains ${b}`).not.toContain(b);
     // Static imports only: `import ... from "./chunk-x.js"` and bare `import "./chunk-x.js"`.
     for (const m of src.matchAll(/^import\s+(?:[^"';]*?\s+from\s+)?"\.\/(chunk-[\w-]+\.js)"/gm)) {
       queue.push(m[1] as string);
     }
   }
+  return seen;
+}
+
+const SDK = ['from "@tavily/core', 'from "axios"'];
+
+test("dist/cli.js statically reaches no SDK, axios, lockfile, or markdown chunk", () => {
+  const seen = expectStaticGraphFree("cli.js", [...SDK, 'from "proper-lockfile"', 'from "marked']);
   expect(seen.size).toBeGreaterThan(1);
+});
+
+test("commands that never call the API statically reach no SDK or axios chunk", () => {
+  const entries = readdirSync(dist).filter((f) =>
+    /^(auth|update|defaults|status|repl)-[\w]+\.js$/.test(f),
+  );
+  expect(entries).toHaveLength(5);
+  for (const entry of entries) expectStaticGraphFree(entry, SDK);
 });
 
 test("an unexpected exception is printed with control bytes stripped", async () => {

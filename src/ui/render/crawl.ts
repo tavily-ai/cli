@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { isTerminal, sanitizeControl, tree } from "../text.js";
+import { isTerminal, plain, safeLink, sanitizeControl, tree } from "../text.js";
 import { colors, err, out } from "../theme.js";
 import { echoPages, emitIfRequested, footer, type Json, list, type Page } from "./emit.js";
 
@@ -20,7 +20,7 @@ function slugOf(url: string): string {
  * Write each page that has content to `<dir>/<slug>.md` as `# <url>`, a blank line, and the content.
  * A slug already used in this run gets the first free `-2`, `-3`, ... suffix.
  */
-export function saveCrawlToDir(data: Json, dir: string): void {
+function saveCrawlToDir(data: Json, dir: string): void {
   mkdirSync(dir, { recursive: true });
   const used = new Set<string>();
   for (const page of list<Page>(data.results)) {
@@ -68,4 +68,25 @@ export function printCrawlResults(
   });
   out(tree(colors.bold(sanitizeControl(data.base_url ?? "")), nodes));
   footer(pages.length, "pages", data.response_time);
+}
+
+export function printMapResults(
+  data: Json,
+  opts: { json: boolean; outputFile?: string | undefined },
+): void {
+  if (emitIfRequested(data, opts)) return;
+  const urls = list<string>(data.results);
+
+  if (!isTerminal(process.stdout)) {
+    for (const url of urls) out(plain(url));
+    return;
+  }
+
+  out(
+    tree(
+      colors.bold(sanitizeControl(data.base_url ?? "")),
+      urls.map((url) => ({ label: safeLink(url, undefined, { stream: process.stdout }) })),
+    ),
+  );
+  footer(urls.length, "URLs", data.response_time);
 }

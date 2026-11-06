@@ -191,6 +191,8 @@ describe("fetchMetadata", () => {
   test.each([
     ["issuer", "https://attacker.example/", "issuer does not match"],
     ["token_endpoint", "http://mcp.tavily.com/token", "invalid token_endpoint"],
+    // An empty endpoint is rejected rather than replaced by the fallback.
+    ["authorization_endpoint", "", "invalid authorization_endpoint"],
     [
       "registration_endpoint",
       "https://user:pass@mcp.tavily.com/register",
@@ -314,10 +316,9 @@ describe("revokeToken", () => {
     expect(f).toHaveBeenCalledTimes(2);
   });
 
-  test("empty token is a no-op and missing endpoint raises", async () => {
+  // Empty tokens are filtered by revokeStoredOauth (config.test.ts).
+  test("missing endpoint raises", async () => {
     const f = stub(() => new Response(null, { status: 200 }));
-    await revokeToken(revokeMeta, publicClient, "", { tokenTypeHint: "access_token" }, f);
-    expect(f).not.toHaveBeenCalled();
     await expect(
       revokeToken(metadata(), publicClient, "t", { tokenTypeHint: "access_token" }, f),
     ).rejects.toThrow(/does not advertise a token revocation endpoint/);
