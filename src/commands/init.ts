@@ -1,4 +1,8 @@
-/** tvly init — authenticate, install Tavily skills, and verify a working CLI. */
+/** tvly init — install tvly globally, authenticate, install Tavily skills, and verify. */
+import { spawnSync } from "node:child_process";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import type { Command } from "commander";
 import { getClientOrKeyless } from "../core/client-factory.js";
@@ -10,6 +14,13 @@ import {
   saveApiKey,
   saveOauthSession,
 } from "../core/config.js";
+import {
+  detectPackageManager,
+  type GlobalManager,
+  globalBinDir,
+  MANAGER_COMMANDS,
+  MANAGER_RUNNERS,
+} from "../core/install-detect.js";
 import { looksHeadless, runBrowserLogin } from "../core/oauth.js";
 import {
   detectAgents,
@@ -33,6 +44,8 @@ export interface InitDeps extends ConfigOptions {
   stdinIsTTY?: boolean;
   confirm?: (question: string) => Promise<boolean>;
   client?: TavilyClientLike;
+  spawnImpl?: typeof spawnSync;
+  platform?: NodeJS.Platform;
 }
 
 export interface InitOptions {
@@ -41,6 +54,7 @@ export interface InitOptions {
   yes?: boolean;
   skipAuth?: boolean;
   skipSkills?: boolean;
+  skipInstall?: boolean;
   apiKey?: string;
   browser?: boolean;
 }
@@ -52,6 +66,7 @@ interface InitResult {
   auth: { authenticated: boolean; method: string };
   skills: { source: string; agents: string[]; restart_required: boolean; skipped: boolean };
   verification: { cli: boolean; auth: boolean; live_search: boolean };
+  install: { global: boolean; manager: string | null; on_path: boolean; path_updated: boolean };
   error?: { stage: string; message: string };
 }
 
@@ -73,8 +88,12 @@ export async function run(opts: InitOptions, cmd: Command, deps: InitDeps = {}):
     cmd.error("error: Use either --skip-auth or --api-key, not both.");
   }
 
+  const which = deps.which ?? defaultWhich(deps.env ?? process.env);
+  const step = await installStep(opts, json, which, deps);
+
   const agents = await selectAgents(requested, opts, json, deps);
   const result = emptyResult(agents);
+  result.install = step.install;
   result.skills.skipped = opts.skipSkills === true || agents.length === 0;
 
   try {
@@ -95,9 +114,8 @@ export async function run(opts: InitOptions, cmd: Command, deps: InitDeps = {}):
     }
   }
 
-  const which = deps.which ?? ((name) => whichOnPath(name, deps.env));
-  result.verification.cli = which("tvly") !== null;
-  if (!result.verification.cli) {
+  result.verification.cli = result.install.on_path || result.install.global;
+  if (!result.verification.cli && !opts.skipInstall && !step.failed) {
     return fail(result, "cli", "tvly is not available on PATH.", 1, json);
   }
 
@@ -110,8 +128,128 @@ export async function run(opts: InitOptions, cmd: Command, deps: InitDeps = {}):
     return fail(result, "live_search", "Tavily search returned no result payload.", 4, json);
   }
 
+  if (step.failed) {
+    return fail(result, "install", INSTALL_INCOMPLETE, 1, json, step.pathNote);
+  }
   result.ok = true;
-  printResult(result, json);
+  printResult(result, json, step.pathNote);
+}
+
+const INSTALL_INCOMPLETE =
+  "Setup incomplete: global CLI installation failed. Other completed steps are preserved.";
+
+/** `which` over the user's PATH, without the npx cache entry npx prepends for this run. */
+function defaultWhich(env: NodeJS.ProcessEnv): (name: string) => string | null {
+  const PATH = (env.PATH ?? "")
+    .split(path.delimiter)
+    .filter((dir) => !dir.replace(/\\/g, "/").includes("/_npx/"))
+    .join(path.delimiter);
+  return (name) => whichOnPath(name, { ...env, PATH });
+}
+
+interface InstallStep {
+  install: InitResult["install"];
+  failed: boolean;
+  pathNote: string | null;
+}
+
+/** Step 1 (Firecrawl's flow): install tvly globally unless it already resolves on PATH. */
+async function installStep(
+  opts: InitOptions,
+  json: boolean,
+  which: (name: string) => string | null,
+  deps: InitDeps,
+): Promise<InstallStep> {
+  const onPath = () => which("tvly") !== null;
+  const step: InstallStep = {
+    install: { global: false, manager: null, on_path: onPath(), path_updated: false },
+    failed: false,
+    pathNote: null,
+  };
+  if (opts.skipInstall || step.install.on_path) return step;
+
+  const interactive = !json && !opts.yes && (deps.stdinIsTTY ?? process.stdin.isTTY === true);
+  if (interactive && !(await (deps.confirm ?? promptConfirm)("Install tvly globally?"))) {
+    return step;
+  }
+
+  const manager = detectPackageManager(deps.env ?? process.env);
+  const platform = deps.platform ?? process.platform;
+  const win = platform === "win32";
+  step.install.manager = manager;
+  const [name, ...args] = MANAGER_COMMANDS[manager];
+  const bin = which(name as string);
+  const r = bin
+    ? (deps.spawnImpl ?? spawnSync)(win ? `"${bin}"` : bin, args, {
+        stdio: json ? ["ignore", 2, 2] : "inherit",
+        shell: win,
+      })
+    : null;
+  if (r?.status !== 0) {
+    err(`Failed to install @tavily/cli globally using ${manager}.`);
+    err(`Retry: ${MANAGER_COMMANDS[manager].join(" ")}`);
+    err(`You can run without a global install: ${MANAGER_RUNNERS[manager]} <command>`);
+    step.failed = true;
+    return step;
+  }
+  step.install.global = true;
+  step.install.on_path = onPath();
+  if (!step.install.on_path) {
+    step.pathNote = await fixPath(manager, interactive, which, deps, platform);
+    step.install.path_updated = step.pathNote !== null;
+  }
+  return step;
+}
+
+/** Shell rc file for a PATH export, as Firecrawl picks it. */
+function rcFileForShell(shell: string, platform: NodeJS.Platform): string {
+  if (shell.includes("zsh")) return "~/.zshrc";
+  if (shell.includes("fish")) return "~/.config/fish/config.fish";
+  if (shell.includes("bash")) return platform === "darwin" ? "~/.bash_profile" : "~/.bashrc";
+  return "~/.profile";
+}
+
+/**
+ * tvly installed but its bin dir is not on PATH. Offer to append it to the shell rc file, or
+ * print the exact fix. Returns the summary line when the rc file was updated.
+ */
+async function fixPath(
+  manager: GlobalManager,
+  interactive: boolean,
+  which: (name: string) => string | null,
+  deps: InitDeps,
+  platform: NodeJS.Platform,
+): Promise<string | null> {
+  const bin = globalBinDir(manager, {
+    which,
+    platform,
+    ...(deps.spawnImpl ? { spawnSync: deps.spawnImpl } : {}),
+  });
+  err("");
+  err(`tvly was installed but isn't on your PATH yet.`);
+  if (bin && platform === "win32") {
+    err("Add this directory to your PATH, then open a new terminal:");
+    err(`  ${bin}`);
+  } else if (bin) {
+    const rc = rcFileForShell((deps.env ?? process.env).SHELL ?? "", platform);
+    const line = rc.includes("fish") ? `fish_add_path ${bin}` : `export PATH="${bin}:$PATH"`;
+    const question = `Add ${bin} to PATH in ${rc}?`;
+    if (interactive && (await (deps.confirm ?? promptConfirm)(question))) {
+      const file = path.join(deps.home ?? homedir(), rc.slice(2));
+      if (!existsSync(file) || !readFileSync(file, "utf8").includes(line)) {
+        mkdirSync(path.dirname(file), { recursive: true });
+        appendFileSync(file, `\n# Added by tvly init\n${line}\n`);
+      }
+      err("Restart your terminal, then run tvly.");
+      return `Added ${bin} to PATH in ${rc}`;
+    }
+    err("Add it to your shell, then restart your terminal:");
+    err(`  echo '${line}' >> ${rc}`);
+  } else {
+    err(`Add your ${manager} global bin directory to PATH.`);
+  }
+  err(`Until then you can still run: ${MANAGER_RUNNERS[manager]} <command>`);
+  return null;
 }
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -188,6 +326,7 @@ function emptyResult(agents: string[]): InitResult {
     auth: { authenticated: false, method: "none" },
     skills: { source: SKILLS_REPO, agents, restart_required: false, skipped: false },
     verification: { cli: false, auth: false, live_search: false },
+    install: { global: false, manager: null, on_path: false, path_updated: false },
   };
 }
 
@@ -197,13 +336,14 @@ function fail(
   message: string,
   code: number,
   json: boolean,
+  pathNote: string | null = null,
 ): never {
   result.error = { stage, message };
-  printResult(result, json);
+  printResult(result, json, pathNote);
   throw new ExitError(code);
 }
 
-function printResult(result: InitResult, json: boolean): void {
+function printResult(result: InitResult, json: boolean, pathNote: string | null = null): void {
   if (json) {
     out(JSON.stringify(result));
     return;
@@ -224,6 +364,10 @@ function printResult(result: InitResult, json: boolean): void {
   if (skills.skipped) out(`    ${colors.dim("• Skills skipped")}`);
   else out(`    ${colors.green("✓")} Tavily skills ready for ${skills.agents.join(", ")}`);
   out(`    ${colors.green("✓")} Live search verified`);
+  if (result.install.global) {
+    out(`    ${colors.green("✓")} tvly installed globally (${result.install.manager})`);
+  }
+  if (pathNote) out(`    ${colors.green("✓")} ${pathNote}`);
 
   if (skills.restart_required) {
     out();

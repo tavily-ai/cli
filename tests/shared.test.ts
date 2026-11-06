@@ -1,3 +1,4 @@
+import path from "node:path";
 import { TavilyKeylessLimitError, TavilyRequestError } from "@tavily/core";
 import { Command } from "commander";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -213,15 +214,19 @@ test("readQueryArg", () => {
 });
 
 test("resolveOutput", () => {
-  const a = resolveOutput("", "search", "Rust 2024 edition");
-  const b = resolveOutput("", "search", "Rust 2024 edition");
+  const resolve = (...args: Parameters<typeof resolveOutput>) =>
+    resolveOutput(...args)
+      ?.split(path.sep)
+      .join("/");
+  const a = resolve("", "search", "Rust 2024 edition");
+  const b = resolve("", "search", "Rust 2024 edition");
   expect(a).toMatch(/^\.tavily\/search-rust-2024-edition-\d{6}-[0-9a-f]{6}\.json$/);
   expect(a).not.toBe(b);
-  expect(resolveOutput("out.json", "search", "x")).toBe("out.json");
-  expect(resolveOutput(undefined, "search", "x")).toBeUndefined();
-  expect(resolveOutput("", "extract", "!!!")).toMatch(/^\.tavily\/extract-result-\d{6}-/);
-  expect(resolveOutput("", "x", "a".repeat(60))).toContain(`x-${"a".repeat(40)}-`);
-  expect(resolveOutput("", "c", "l", new Date(2026, 0, 2, 3, 4, 5), () => "abcdef")).toBe(
+  expect(resolve("out.json", "search", "x")).toBe("out.json");
+  expect(resolve(undefined, "search", "x")).toBeUndefined();
+  expect(resolve("", "extract", "!!!")).toMatch(/^\.tavily\/extract-result-\d{6}-/);
+  expect(resolve("", "x", "a".repeat(60))).toContain(`x-${"a".repeat(40)}-`);
+  expect(resolve("", "c", "l", new Date(2026, 0, 2, 3, 4, 5), () => "abcdef")).toBe(
     ".tavily/c-l-030405-abcdef.json",
   );
 });

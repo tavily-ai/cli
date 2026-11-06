@@ -10,7 +10,7 @@ import {
 import fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   type Config,
@@ -33,7 +33,9 @@ import {
 import { expiresAtFromNow, type OAuthSession } from "../src/core/oauth.js";
 import { OAuthError } from "../src/errors.js";
 
-const CONFIG_MODULE = fileURLToPath(new URL("../src/core/config.ts", import.meta.url));
+const CONFIG_MODULE = pathToFileURL(
+  fileURLToPath(new URL("../src/core/config.ts", import.meta.url)),
+).href;
 const FIXTURE = fileURLToPath(new URL("./fixtures/config-python-written.json", import.meta.url));
 
 interface Call {

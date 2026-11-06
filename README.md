@@ -20,20 +20,15 @@ CLI and agent tools for the [Tavily API](https://docs.tavily.com) — search, ex
 
 ## Installation
 
-Requires **Node.js 20.1+**.
-
-### Guided installer
-
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tavily-ai/cli/main/install.sh | sh
+npx @tavily/cli init
 ```
 
-On a fresh interactive desktop installation, the installer starts `tvly init`
-to guide authentication, agent detection, skill installation, and verification.
-In CI, SSH/headless, and other non-interactive environments, run `tvly init`
-separately with the [appropriate setup options](#non-interactive-mode-for-ai-agents--scripts).
+This installs `tvly` globally, authenticates, installs the Tavily skills for the agents it detects (Claude Code, Codex, Cursor), and verifies a live search. Add `--yes` to run it without prompts, or `--skip-install` to leave `tvly` uninstalled.
 
-### Package manager
+Requires **Node.js 20.1+**.
+
+### Install globally
 
 Choose the package manager you use:
 
@@ -78,12 +73,23 @@ tvly update
 
 Source (`npm link`) and direct-URL installations are detected and must be updated from their original source.
 
+### Shell installer
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tavily-ai/cli/main/install.sh | sh
+```
+
+On a fresh interactive desktop installation, the installer starts `tvly init`
+to guide authentication, agent detection, skill installation, and verification.
+In CI, SSH/headless, and other non-interactive environments, run `tvly init`
+separately with the [appropriate setup options](#non-interactive-mode-for-ai-agents--scripts).
+
 ## Quick Start
 
 ### Initialize Tavily
 
-The guided installer starts setup automatically on a fresh interactive desktop
-installation. After a package-manager, source, or non-interactive install, run:
+Setup starts from `npx @tavily/cli init`. After a package-manager, source, or
+non-interactive install, run:
 
 ```bash
 tvly init
@@ -92,9 +98,10 @@ tvly search "latest AI trends"
 
 `tvly init` guides you through:
 
-1. **Authentication:** reuse an existing credential or sign in through browser OAuth.
-2. **Agent setup:** detect Claude Code, Codex, and Cursor and install the Tavily agent skills.
-3. **Verification:** check the CLI, then run a live search.
+1. **Global install:** if `tvly` is not on your PATH, install it globally with the package manager that ran `init` (npm, pnpm, yarn, or bun). If the install directory is not on your PATH, `init` offers to add it to your shell profile, or prints the line to add yourself.
+2. **Authentication:** reuse an existing credential or sign in through browser OAuth.
+3. **Agent setup:** detect Claude Code, Codex, and Cursor and install the Tavily agent skills.
+4. **Verification:** check the CLI, then run a live search.
 
 Skills are installed with the [skills.sh CLI](https://skills.sh)
 (`npx skills add tavily-ai/skills`), so skill setup needs `npx` on your PATH.
@@ -355,7 +362,7 @@ tvly init --agent codex --skip-auth --yes --json
 tvly init --skip-auth --skip-skills --json
 ```
 
-Setup JSON includes `ok`, `mode`, `auth`, `skills`, and `verification`. On
+Setup JSON includes `ok`, `mode`, `install`, `auth`, `skills`, and `verification`. On
 failure, `error.stage` identifies the failed step. Setup always performs a
 live search, so it needs network access even with `--skip-skills`.
 
@@ -404,9 +411,10 @@ Run first-time setup, install or update the Tavily skills (through
 |--------|-------------|
 | `--agent` | Install skills for `claude-code`, `codex`, or `cursor`; repeat to select more than one |
 | `--all` | Install skills for every detected agent |
-| `--yes` | Accept detected agents without prompting |
+| `--yes` | Accept detected agents and the global install without prompting |
 | `--skip-auth` | Skip login when no credential is configured; existing credentials are still used |
 | `--skip-skills` | Skip agent-skill installation and updates |
+| `--skip-install` | Skip the global `tvly` install |
 | `--api-key` | Authenticate with an API key instead of OAuth |
 | `--browser` / `--no-browser` | Open OAuth in a browser or print the URL; both require the local callback |
 
