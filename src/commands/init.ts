@@ -312,8 +312,7 @@ function authMethod(key: string, config: ConfigOptions): string {
 }
 
 async function verifyLiveSearch(deps: InitDeps): Promise<boolean> {
-  const client =
-    deps.client ?? (await getClientOrKeyless({ clientName: "tavily-cli-init" })).client;
+  const client = deps.client ?? (await getClientOrKeyless("tavily-cli-init"));
   const response = await client.search({ query: "Tavily Search API", max_results: 1 });
   return Array.isArray((response as { results?: unknown } | null)?.results);
 }

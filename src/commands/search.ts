@@ -23,11 +23,6 @@ import {
 const MAX_QUERIES = 5;
 const DEFAULT_CHARS = 600;
 
-export interface SearchDeps {
-  getClientOrKeyless?: typeof getClientOrKeyless;
-  readStdin?: () => string;
-}
-
 interface SearchOptions extends Record<string, unknown> {
   maxChars?: number;
   output?: string;
@@ -47,11 +42,9 @@ export function configure(cmd: Command): void {
   addClientNameOption(cmd);
 }
 
-function readQueries(args: string[], readStdin: (() => string) | undefined): string[] {
+function readQueries(args: string[]): string[] {
   const queries =
-    args.length === 1 && args[0] === "-"
-      ? [readQueryArg("-", readStdin)]
-      : args.filter((q) => q.trim());
+    args.length === 1 && args[0] === "-" ? [readQueryArg("-")] : args.filter((q) => q.trim());
   if (queries.length === 0) {
     throw new InvalidArgumentError(
       "QUERY is required. Pass a query string or use '-' to read from stdin.",
@@ -65,16 +58,11 @@ function readQueries(args: string[], readStdin: (() => string) | undefined): str
   return queries;
 }
 
-export async function run(
-  args: string[],
-  opts: SearchOptions,
-  cmd: Command,
-  deps: SearchDeps = {},
-): Promise<void> {
+export async function run(args: string[], opts: SearchOptions, cmd: Command): Promise<void> {
   const json = resolveJson(cmd);
   let queries: string[];
   try {
-    queries = readQueries(args, deps.readStdin);
+    queries = readQueries(args);
   } catch (e) {
     if (e instanceof InvalidArgumentError) cmd.error(`error: ${e.message}`);
     throw e;
@@ -83,21 +71,18 @@ export async function run(
   // One search's worth of text per command, however many queries it holds.
   const maxChars = opts.maxChars ?? Math.floor(DEFAULT_CHARS / queries.length);
   const body = searchBodyFromOptions(opts);
-  const resolveClient = deps.getClientOrKeyless ?? getClientOrKeyless;
   const spin = { enabled: !json };
 
   if (queries.length === 1) {
     const response = await runWithApiErrors(json, async () => {
-      const { client } = await resolveClient({ clientName: opts.clientName });
+      const client = await getClientOrKeyless(opts.clientName);
       return withSpinner("Searching...", spin, () => client.search({ query: queries[0], ...body }));
     });
     await printSearchResults(response, { json, outputFile, maxChars });
     return;
   }
 
-  const { client } = await runWithApiErrors(json, () =>
-    resolveClient({ clientName: opts.clientName }),
-  );
+  const client = await runWithApiErrors(json, () => getClientOrKeyless(opts.clientName));
   const capHits: TavilyKeylessLimitError[] = [];
   let limitHit = false;
   const responses = await withSpinner("Searching...", spin, () =>

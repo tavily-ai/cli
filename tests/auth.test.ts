@@ -9,7 +9,7 @@ import type { OAuthSession } from "../src/core/oauth.js";
 import { ExitError, OAuthError } from "../src/errors.js";
 import { buildProgram } from "../src/program.js";
 import { captureOutput, visible } from "./helpers/capture.js";
-import { runProgram, stubClient } from "./helpers/program.js";
+import { clientFactory, runProgram, stubClient } from "./helpers/program.js";
 
 const io = captureOutput();
 
@@ -296,12 +296,8 @@ describe("auth", () => {
 });
 
 test("search --json reports refresh failure without a keyless fallback", async () => {
-  const getClientOrKeyless = async () => {
-    throw new OAuthError("network down");
-  };
-  const code = await runProgram(["search", "query", "--json"], stubClient({}), {
-    getClientOrKeyless,
-  });
+  clientFactory.getClientOrKeyless.mockRejectedValueOnce(new OAuthError("network down"));
+  const code = await runProgram(["search", "query", "--json"], stubClient({}));
   expect(code).toBe(3);
   expect(stdoutJson()).toEqual({
     error: { code: "oauth_refresh_failed", message: "network down" },

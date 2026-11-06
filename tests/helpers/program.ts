@@ -1,17 +1,30 @@
 import { CommanderError } from "commander";
-import { type CrawlDeps, run as runCrawl } from "../../src/commands/crawl.js";
-import { type ExtractDeps, run as runExtract } from "../../src/commands/extract.js";
-import { type MapDeps, run as runMap } from "../../src/commands/map.js";
-import {
-  type ResearchDeps,
-  poll as researchPoll,
-  run as researchRun,
-  status as researchStatus,
-} from "../../src/commands/research.js";
-import { run as runSearch, type SearchDeps } from "../../src/commands/search.js";
+import { vi } from "vitest";
 import type { TavilyClientLike } from "../../src/core/tavily-client.js";
 import { ExitError } from "../../src/errors.js";
 import { buildProgram } from "../../src/program.js";
+
+/** What `runProgram` feeds the commands: the client both factories return, and stdin text. */
+const fake = vi.hoisted(() => ({ client: undefined as unknown as TavilyClientLike, stdin: "" }));
+
+type Factory = typeof import("../../src/core/client-factory.js");
+
+/** Both factories resolve to the client passed to `runProgram`; tests override them per call. */
+const factory = vi.hoisted(() => ({
+  getKeyedClient: vi.fn<Factory["getKeyedClient"]>(async () => fake.client),
+  getClientOrKeyless: vi.fn<Factory["getClientOrKeyless"]>(async () => fake.client),
+}));
+export const clientFactory = factory;
+
+vi.mock("../../src/core/client-factory.js", () => factory);
+vi.mock("node:fs", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  const readFileSync = ((file: unknown, ...rest: unknown[]) =>
+    file === 0
+      ? fake.stdin
+      : (fs.readFileSync as (...a: unknown[]) => unknown)(file, ...rest)) as typeof fs.readFileSync;
+  return { ...fs, default: { ...fs, readFileSync }, readFileSync };
+});
 
 /** A client whose methods are the given functions; every other method throws. */
 export function stubClient(methods: Partial<TavilyClientLike>): TavilyClientLike {
@@ -33,30 +46,12 @@ export function stubClient(methods: Partial<TavilyClientLike>): TavilyClientLike
 export async function runProgram(
   argv: string[],
   client: TavilyClientLike,
-  extra: Partial<SearchDeps & ExtractDeps & CrawlDeps & MapDeps & ResearchDeps> = {},
+  opts: { stdin?: string } = {},
 ): Promise<number> {
-  const deps = {
-    requireApiKeyFriendly: async () => "tvly-test",
-    getClient: async () => client,
-    getClientOrKeyless: async () => ({ client, keyless: false }),
-    ...extra,
-  };
-  const program = buildProgram();
-  for (const sub of program.commands) {
-    if (sub.name() === "search") sub.action((a, o, c) => runSearch(a, o, c, deps));
-    if (sub.name() === "extract") sub.action((a, o, c) => runExtract(a, o, c, deps));
-    if (sub.name() === "crawl") sub.action((a, o, c) => runCrawl(a, o, c, deps));
-    if (sub.name() === "map") sub.action((a, o, c) => runMap(a, o, c, deps));
-    if (sub.name() === "research") {
-      for (const r of sub.commands) {
-        if (r.name() === "run") r.action((a, o, c) => researchRun(a, o, c, deps));
-        if (r.name() === "status") r.action((a, o, c) => researchStatus(a, o, c, deps));
-        if (r.name() === "poll") r.action((a, o, c) => researchPoll(a, o, c, deps));
-      }
-    }
-  }
+  fake.client = client;
+  fake.stdin = opts.stdin ?? "";
   try {
-    await program.parseAsync(argv, { from: "user" });
+    await buildProgram().parseAsync(argv, { from: "user" });
     return 0;
   } catch (e) {
     if (e instanceof ExitError) return e.code;

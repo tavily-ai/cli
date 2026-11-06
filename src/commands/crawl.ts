@@ -1,16 +1,11 @@
 /** tvly crawl — crawl a website via the Tavily API (needs an API key). */
 import type { Command } from "commander";
-import { getClient, requireApiKeyFriendly } from "../core/client-factory.js";
+import { getKeyedClient } from "../core/client-factory.js";
 import { resolveOutput } from "../ui/output-file.js";
 import { printCrawlResults } from "../ui/render.js";
 import { withSpinner } from "../ui/spinner.js";
 import { hostOf } from "../ui/text.js";
 import { resolveJson, runWithApiErrors, type SiteOptions, siteBody } from "./shared.js";
-
-export interface CrawlDeps {
-  requireApiKeyFriendly?: typeof requireApiKeyFriendly;
-  getClient?: typeof getClient;
-}
 
 interface CrawlOptions extends SiteOptions {
   chunksPerSource?: number;
@@ -22,20 +17,10 @@ interface CrawlOptions extends SiteOptions {
   clientName?: string;
 }
 
-export async function run(
-  url: string,
-  opts: CrawlOptions,
-  cmd: Command,
-  deps: CrawlDeps = {},
-): Promise<void> {
+export async function run(url: string, opts: CrawlOptions, cmd: Command): Promise<void> {
   const json = resolveJson(cmd);
   const outputFile = resolveOutput(opts.output, "crawl", hostOf(url));
-
-  await (deps.requireApiKeyFriendly ?? requireApiKeyFriendly)("crawl", { json });
-  const client = await (deps.getClient ?? getClient)({
-    json,
-    ...(opts.clientName ? { clientName: opts.clientName } : {}),
-  });
+  const client = await getKeyedClient("crawl", { json, clientName: opts.clientName });
 
   const body = siteBody(url, opts);
   if (opts.chunksPerSource !== undefined) body.chunks_per_source = opts.chunksPerSource;

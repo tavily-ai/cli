@@ -1,8 +1,8 @@
 import { createInterface } from "node:readline/promises";
 import { type Command, CommanderError } from "commander";
-import { handleOauthRefreshError } from "./commands/shared.js";
-import { authSource, getApiKey } from "./core/config.js";
-import { ExitError, OAuthError } from "./errors.js";
+import { getApiKeyOrExit } from "./commands/shared.js";
+import { authSource } from "./core/config.js";
+import { ExitError } from "./errors.js";
 import { buildProgram } from "./program.js";
 import { sanitizeControl } from "./ui/text.js";
 import { colorEnabled, colors, LOGO } from "./ui/theme.js";
@@ -23,13 +23,7 @@ async function printBanner(
   say: (line?: string) => void,
   opts: Pick<ReplOptions, "home" | "env">,
 ): Promise<void> {
-  let key: string | null = null;
-  try {
-    key = await getApiKey(opts);
-  } catch (e) {
-    if (e instanceof OAuthError) handleOauthRefreshError(e, false);
-    throw e;
-  }
+  const key = await getApiKeyOrExit(false, opts);
 
   say(LOGO);
   say(`  ${colors.dim(`v${VERSION}`)}`);

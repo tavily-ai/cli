@@ -16,7 +16,7 @@ import { ExitError, OAuthError } from "../errors.js";
 import { spinner } from "../ui/spinner.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, LOGO, out } from "../ui/theme.js";
-import { handleOauthRefreshError, resolveJson } from "./shared.js";
+import { getApiKeyOrExit, resolveJson } from "./shared.js";
 
 export interface AuthDeps extends ConfigOptions {
   login?: typeof runBrowserLogin;
@@ -153,11 +153,11 @@ function failLogin(message: string, json: boolean): never {
 type Method = "env" | "oauth" | "oauth_legacy" | "api_key";
 
 /** The effective credential and where it came from. */
-async function effectiveAuthState(
+function effectiveAuthState(
+  key: string | null,
   deps: AuthDeps,
-): Promise<{ key: string | null; method: Method | null; source: string | null }> {
+): { key: string | null; method: Method | null; source: string | null } {
   const config = configOptions(deps);
-  const key = await getApiKey(config);
   if (!key) return { key: null, method: null, source: null };
   const { file } = configPaths(deps.home);
   if ((deps.env ?? process.env).TAVILY_API_KEY) {
@@ -179,7 +179,7 @@ export async function runLogout(
 ): Promise<void> {
   const json = resolveJson(cmd);
   const result = await clearCredentials(configOptions(deps));
-  const { key, method, source } = await effectiveAuthState(deps);
+  const { key, method, source } = effectiveAuthState(await getApiKey(configOptions(deps)), deps);
   const envPresent = method === "env";
   const payload: Record<string, unknown> = {
     authenticated: key !== null,
@@ -230,14 +230,10 @@ export async function runAuth(
   deps: AuthDeps = {},
 ): Promise<void> {
   const json = resolveJson(cmd);
-  let state: Awaited<ReturnType<typeof effectiveAuthState>>;
-  try {
-    state = await effectiveAuthState(deps);
-  } catch (e) {
-    if (e instanceof OAuthError) handleOauthRefreshError(e, json);
-    throw e;
-  }
-  const { key, method, source } = state;
+  const { key, method, source } = effectiveAuthState(
+    await getApiKeyOrExit(json, configOptions(deps)),
+    deps,
+  );
   if (json) {
     out(JSON.stringify({ authenticated: key !== null, method, source }));
     return;

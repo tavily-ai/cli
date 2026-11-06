@@ -2,11 +2,10 @@ import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
-import { requireApiKeyFriendly } from "../src/core/client-factory.js";
 import type { Json } from "../src/core/tavily-client.js";
 import { setTerminalOverride } from "../src/ui/text.js";
 import { captureOutput, visible } from "./helpers/capture.js";
-import { runProgram, stubClient } from "./helpers/program.js";
+import { clientFactory, runProgram, stubClient } from "./helpers/program.js";
 
 const io = captureOutput();
 const load = (name: string) =>
@@ -17,20 +16,26 @@ const tmp = () => mkdtempSync(join(tmpdir(), "tvly-crawl-map-"));
 
 afterEach(() => vi.unstubAllEnvs());
 
-test.each(["crawl", "map"])(
-  "%s without a key exits 3 with the requires-a-key message",
-  async (cmd) => {
-    const home = tmp();
-    vi.stubEnv("HOME", home);
-    vi.stubEnv("USERPROFILE", home);
-    vi.stubEnv("TAVILY_API_KEY", "");
-    const code = await runProgram([cmd, "https://a.example"], stubClient({}), {
-      requireApiKeyFriendly,
-    });
-    expect(code).toBe(3);
-    expect(io.stderr()).toContain(`The ${cmd} command requires a Tavily API key.`);
-  },
-);
+test.each([
+  ["crawl", "https://a.example"],
+  ["map", "https://a.example"],
+  ["research", "q"],
+])("%s without a key exits 3 with only the requires-a-key message", async (cmd, arg) => {
+  const home = tmp();
+  vi.stubEnv("HOME", home);
+  vi.stubEnv("USERPROFILE", home);
+  vi.stubEnv("TAVILY_API_KEY", "");
+  const actual = await vi.importActual<typeof import("../src/core/client-factory.js")>(
+    "../src/core/client-factory.js",
+  );
+  clientFactory.getKeyedClient.mockImplementationOnce(actual.getKeyedClient);
+  const code = await runProgram([cmd, arg], stubClient({}));
+  expect(code).toBe(3);
+  expect(io.stdout()).toBe("");
+  const stderr = visible(io.stderr());
+  expect(stderr).toContain(`The ${cmd} command requires a Tavily API key.`);
+  expect(stderr).not.toContain("No Tavily API key found");
+});
 
 test("--no-external sends false, --allow-external sends true, omission sends nothing", async () => {
   const map = vi.fn(async () => mapFixture);

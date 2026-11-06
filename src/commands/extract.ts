@@ -10,10 +10,6 @@ import { resolveJson, runWithApiErrors } from "./shared.js";
 
 const MAX_URLS = 20;
 
-export interface ExtractDeps {
-  getClientOrKeyless?: typeof getClientOrKeyless;
-}
-
 interface ExtractOptions {
   query?: string;
   chunksPerSource?: number;
@@ -25,12 +21,7 @@ interface ExtractOptions {
   clientName?: string;
 }
 
-export async function run(
-  urls: string[],
-  opts: ExtractOptions,
-  cmd: Command,
-  deps: ExtractDeps = {},
-): Promise<void> {
+export async function run(urls: string[], opts: ExtractOptions, cmd: Command): Promise<void> {
   const json = resolveJson(cmd);
   if (urls.length > MAX_URLS) cmd.error(`error: Maximum ${MAX_URLS} URLs per request.`);
   const outputFile = resolveOutput(opts.output, "extract", domainOf(urls[0] ?? ""));
@@ -43,9 +34,8 @@ export async function run(
   if (opts.includeImages) body.include_images = true;
   if (opts.timeout !== undefined) body.timeout = opts.timeout;
 
-  const resolveClient = deps.getClientOrKeyless ?? getClientOrKeyless;
   const response = await runWithApiErrors(json, async () => {
-    const { client } = await resolveClient({ clientName: opts.clientName });
+    const client = await getClientOrKeyless(opts.clientName);
     const label = `Extracting ${urls.length} URL${urls.length > 1 ? "s" : ""}...`;
     return withSpinner(label, { enabled: !json }, () => client.extract(body));
   });

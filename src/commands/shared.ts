@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import { TavilyKeylessLimitError, TavilyRequestError } from "@tavily/core";
 import { InvalidArgumentError } from "commander";
+import { type ConfigOptions, getApiKey } from "../core/config.js";
 import { ExitError, OAuthError } from "../errors.js";
 import { formatKeylessEnvelopeForTerminal } from "../ui/keyless.js";
 import { safeLink, sanitizeControl } from "../ui/text.js";
@@ -60,6 +61,19 @@ export function handleOauthRefreshError(e: unknown, json: boolean): never {
     err(`  ${colors.pink("> OAuth refresh failed:")} ${text}`);
   }
   throw new ExitError(3);
+}
+
+/** The stored/env credential, or null; a failed OAuth refresh exits 3. */
+export async function getApiKeyOrExit(
+  json: boolean,
+  opts: ConfigOptions = {},
+): Promise<string | null> {
+  try {
+    return await getApiKey(opts);
+  } catch (e) {
+    if (e instanceof OAuthError) handleOauthRefreshError(e, json);
+    throw e;
+  }
 }
 
 export function handleApiError(e: unknown, json: boolean): never {

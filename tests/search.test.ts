@@ -102,9 +102,9 @@ test("usage errors exit 2", async () => {
 test("- reads one query from stdin", async () => {
   const { search, client } = fakeClient();
   setTerminalOverride(false);
-  await runProgram(["search", "-"], client, { readStdin: () => "  from stdin \n" });
+  await runProgram(["search", "-"], client, { stdin: "  from stdin \n" });
   expect(search).toHaveBeenCalledWith({ query: "from stdin" });
-  expect(await runProgram(["search", "-"], client, { readStdin: () => " \n" })).toBe(2);
+  expect(await runProgram(["search", "-"], client, { stdin: " \n" })).toBe(2);
 });
 
 test("--max-chars defaults to 600 shared across queries and can be set", async () => {

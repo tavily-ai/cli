@@ -1,7 +1,7 @@
 /** tvly research — deep research via the Tavily API (async: run/status/poll, or a live stream). */
 import { readFileSync } from "node:fs";
 import { type Command, InvalidArgumentError } from "commander";
-import { getClient, requireApiKeyFriendly } from "../core/client-factory.js";
+import { getKeyedClient } from "../core/client-factory.js";
 import type { Json, TavilyClientLike } from "../core/tavily-client.js";
 import { resolveOutput } from "../ui/output-file.js";
 import { emit, printResearchResult } from "../ui/render.js";
@@ -9,13 +9,6 @@ import { spinner, withSpinner } from "../ui/spinner.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
 import { readQueryArg, resolveJson, runWithApiErrors } from "./shared.js";
-
-export interface ResearchDeps {
-  requireApiKeyFriendly?: typeof requireApiKeyFriendly;
-  getClient?: typeof getClient;
-  readStdin?: () => string;
-  sleep?: (ms: number) => Promise<void>;
-}
 
 export interface PollOptions {
   pollInterval: number;
@@ -55,22 +48,12 @@ export function normalizeResearchArgs(args: string[]): string[] {
   return args;
 }
 
-const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const isDone = (r: Json) => r.status === "completed" || r.status === "failed";
 
-async function connect(
-  cmd: Command,
-  label: string,
-  clientName: string | undefined,
-  deps: ResearchDeps,
-) {
+async function connect(cmd: Command, label: string, clientName: string | undefined) {
   const json = resolveJson(cmd);
-  await (deps.requireApiKeyFriendly ?? requireApiKeyFriendly)(label, { json });
-  const client = await (deps.getClient ?? getClient)({
-    json,
-    ...(clientName ? { clientName } : {}),
-  });
-  return { json, client };
+  return { json, client: await getKeyedClient(label, { json, clientName }) };
 }
 
 /**
@@ -82,7 +65,6 @@ async function waitForResult(
   client: TavilyClientLike,
   requestId: string,
   opts: { json: boolean; pollInterval: number; timeout: number; label: string },
-  sleep: (ms: number) => Promise<void>,
 ): Promise<Json | undefined> {
   if (opts.json) {
     const deadline = Date.now() + opts.timeout * 1000;
@@ -176,11 +158,10 @@ export async function run(
   query: string | undefined,
   opts: RunOptions,
   cmd: Command,
-  deps: ResearchDeps = {},
 ): Promise<void> {
   let input: string;
   try {
-    input = readQueryArg(query, deps.readStdin);
+    input = readQueryArg(query);
   } catch (e) {
     if (e instanceof InvalidArgumentError) cmd.error(`error: ${e.message}`);
     throw e;
@@ -199,7 +180,7 @@ export async function run(
   }
   if (opts.citationFormat !== undefined) body.citation_format = opts.citationFormat;
 
-  const { json, client } = await connect(cmd, "research", opts.clientName, deps);
+  const { json, client } = await connect(cmd, "research", opts.clientName);
 
   if (opts.stream) {
     await runWithApiErrors(json, async () => {
@@ -237,12 +218,12 @@ export async function run(
   }
 
   const response = await runWithApiErrors(json, () =>
-    waitForResult(
-      client,
-      requestId,
-      { json, pollInterval: opts.pollInterval, timeout: opts.timeout, label: "Researching" },
-      deps.sleep ?? defaultSleep,
-    ),
+    waitForResult(client, requestId, {
+      json,
+      pollInterval: opts.pollInterval,
+      timeout: opts.timeout,
+      label: "Researching",
+    }),
   );
   if (response === undefined) {
     if (json) emit({ request_id: requestId, status: "timeout" }, { outputFile, pretty: false });
@@ -267,9 +248,8 @@ export async function status(
   requestId: string,
   opts: { clientName?: string },
   cmd: Command,
-  deps: ResearchDeps = {},
 ): Promise<void> {
-  const { json, client } = await connect(cmd, "research status", opts.clientName, deps);
+  const { json, client } = await connect(cmd, "research status", opts.clientName);
   const response = await runWithApiErrors(json, () => client.getResearch(requestId));
   if (json) {
     emit(response, { pretty: false });
@@ -287,22 +267,17 @@ export async function status(
   }
 }
 
-export async function poll(
-  requestId: string,
-  opts: PollOptions,
-  cmd: Command,
-  deps: ResearchDeps = {},
-): Promise<void> {
+export async function poll(requestId: string, opts: PollOptions, cmd: Command): Promise<void> {
   const outputFile = resolveOutput(opts.output, "research", requestId);
-  const { json, client } = await connect(cmd, "research poll", opts.clientName, deps);
+  const { json, client } = await connect(cmd, "research poll", opts.clientName);
   const label = `Polling research ${sanitizeControl(requestId.slice(0, 8))}`;
   const response = await runWithApiErrors(json, () =>
-    waitForResult(
-      client,
-      requestId,
-      { json, pollInterval: opts.pollInterval, timeout: opts.timeout, label },
-      deps.sleep ?? defaultSleep,
-    ),
+    waitForResult(client, requestId, {
+      json,
+      pollInterval: opts.pollInterval,
+      timeout: opts.timeout,
+      label,
+    }),
   );
   if (response === undefined) {
     if (json) emit({ request_id: requestId, status: "timeout" }, { outputFile, pretty: false });
