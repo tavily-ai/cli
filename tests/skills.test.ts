@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { detectAgents, installAgentSkills } from "../src/core/skills.js";
+import { detectAgents, installAgentSkills, SKILLS_REPO } from "../src/core/skills.js";
 
 const SKILLS = ["tavily-search", "tavily-research"];
 const NPX = "/usr/bin/npx";
@@ -60,7 +60,13 @@ describe("installAgentSkills", () => {
     const calls: Call[] = [];
     const agents = ["claude-code", "codex", "cursor"];
     const run = (spawnImpl: never) =>
-      installAgentSkills(agents, { home, env: {}, which, spawnImpl, platform: "linux" });
+      installAgentSkills(SKILLS_REPO, agents, {
+        home,
+        env: {},
+        which,
+        spawnImpl,
+        platform: "linux",
+      });
 
     const first = await run(fakeNpx(home, calls));
     const { cmd, args, opts } = calls[0] as Call;
@@ -94,7 +100,12 @@ describe("installAgentSkills", () => {
 
   it("counts new agent links", async () => {
     const calls: Call[] = [];
-    await installAgentSkills(["codex"], { home, env: {}, which, spawnImpl: fakeNpx(home, calls) });
+    await installAgentSkills(SKILLS_REPO, ["codex"], {
+      home,
+      env: {},
+      which,
+      spawnImpl: fakeNpx(home, calls),
+    });
     const linkSkills = (() => {
       for (const name of SKILLS) {
         const link = path.join(home, ".claude", "skills", name);
@@ -104,7 +115,7 @@ describe("installAgentSkills", () => {
       return result(0);
     }) as never;
 
-    const out = await installAgentSkills(["claude-code", "codex"], {
+    const out = await installAgentSkills(SKILLS_REPO, ["claude-code", "codex"], {
       home,
       env: {},
       which,
@@ -121,7 +132,7 @@ describe("installAgentSkills", () => {
 
     it("runs npx-cli.js through node", async () => {
       const calls: Call[] = [];
-      await installAgentSkills(["codex"], {
+      await installAgentSkills(SKILLS_REPO, ["codex"], {
         ...win,
         home,
         existsSync: () => true,
@@ -135,7 +146,7 @@ describe("installAgentSkills", () => {
 
     it("falls back to the quoted .cmd through the shell", async () => {
       const calls: Call[] = [];
-      await installAgentSkills(["codex"], {
+      await installAgentSkills(SKILLS_REPO, ["codex"], {
         ...win,
         home,
         existsSync: () => false,
@@ -154,25 +165,25 @@ describe("installAgentSkills", () => {
       status: null,
       error: new Error("spawnSync npx ENOBUFS"),
     })) as never;
-    await expect(installAgentSkills(["codex"], { home, which, spawnImpl: err })).rejects.toThrow(
-      "npx skills failed: spawnSync npx ENOBUFS",
-    );
+    await expect(
+      installAgentSkills(SKILLS_REPO, ["codex"], { home, which, spawnImpl: err }),
+    ).rejects.toThrow("npx skills failed: spawnSync npx ENOBUFS");
     const sig = (() => ({ ...result(0), status: null, signal: "SIGKILL" })) as never;
-    await expect(installAgentSkills(["codex"], { home, which, spawnImpl: sig })).rejects.toThrow(
-      "npx skills failed: signal SIGKILL",
-    );
+    await expect(
+      installAgentSkills(SKILLS_REPO, ["codex"], { home, which, spawnImpl: sig }),
+    ).rejects.toThrow("npx skills failed: signal SIGKILL");
   });
 
   it("requires npx", async () => {
     await expect(
-      installAgentSkills(["codex"], { home, env: {}, which: () => null }),
+      installAgentSkills(SKILLS_REPO, ["codex"], { home, env: {}, which: () => null }),
     ).rejects.toThrow(/requires Node\.js/);
   });
 
   it("reports npx failure", async () => {
     const spawnImpl = fakeNpx(home, [], { status: 1 });
     await expect(
-      installAgentSkills(["codex"], { home, env: {}, which, spawnImpl }),
+      installAgentSkills(SKILLS_REPO, ["codex"], { home, env: {}, which, spawnImpl }),
     ).rejects.toThrow("npx skills failed: Error: repo not found");
   });
 });

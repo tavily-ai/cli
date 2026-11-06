@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { type InitDeps, run } from "../src/commands/init.js";
 import { detectPackageManager } from "../src/core/install-detect.js";
+import { SKILLS_REPO, WORKFLOWS_REPO } from "../src/core/skills.js";
 import { captureOutput } from "./helpers/capture.js";
 import { runProgram, stubClient } from "./helpers/program.js";
 
@@ -42,7 +43,7 @@ describe("init", () => {
     const code = await runInit(["--json"], {
       home,
       env: { TAVILY_API_KEY: "tvly-test" },
-      installSkills: async (agents) => ({ agents, restartRequired: true }),
+      installSkills: async (_repo, agents) => ({ agents, restartRequired: true }),
       which: () => "/usr/bin/tvly",
       client: okClient,
     });
@@ -143,7 +144,7 @@ describe("init", () => {
     const ok = await runInit(["--agent", "CODEX", "--agent", "codex", "--json"], {
       home,
       env: { TAVILY_API_KEY: "tvly-test" },
-      installSkills: async (agents) => ({ agents, restartRequired: false }),
+      installSkills: async (_repo, agents) => ({ agents, restartRequired: false }),
       which: () => "/usr/bin/tvly",
       client: okClient,
     });
@@ -168,6 +169,100 @@ describe("init", () => {
     const output = stdoutJson();
     expect(output.mode).toBe("keyless");
     expect(output.skills.skipped).toBe(true);
+  });
+});
+
+describe("init workflows", () => {
+  const WORKFLOWS_QUESTION = `Install the Tavily official workflows (${WORKFLOWS_REPO})?`;
+
+  function setup(answers: { skills?: boolean; workflows?: boolean } = {}) {
+    mkdirSync(join(home, ".codex"));
+    const confirm = vi.fn(async (question: string) =>
+      question === WORKFLOWS_QUESTION ? (answers.workflows ?? true) : (answers.skills ?? true),
+    );
+    const installSkills = vi.fn(async (_repo: string, agents: string[]) => ({
+      agents,
+      restartRequired: false,
+    }));
+    const deps: InitDeps = {
+      home,
+      env: { TAVILY_API_KEY: "tvly-test" },
+      which: () => "/usr/bin/tvly",
+      client: okClient,
+      stdinIsTTY: true,
+      confirm,
+      installSkills,
+    };
+    return { deps, confirm, installSkills };
+  }
+
+  test("installs the workflows when the prompt is accepted", async () => {
+    const { deps, confirm, installSkills } = setup();
+    expect(await runInit([], deps)).toBe(0);
+    expect(confirm).toHaveBeenCalledWith(WORKFLOWS_QUESTION);
+    expect(installSkills).toHaveBeenCalledWith(SKILLS_REPO, ["codex"]);
+    expect(installSkills).toHaveBeenCalledWith(WORKFLOWS_REPO, ["codex"]);
+    expect(io.stdout()).toContain("Tavily workflows ready for codex");
+  });
+
+  // --json never prompts, so the declined prompts are checked through the human summary.
+  test("declining the workflows prompt skips them", async () => {
+    const { deps, installSkills } = setup({ workflows: false });
+    expect(await runInit([], deps)).toBe(0);
+    expect(installSkills).toHaveBeenCalledTimes(1);
+    expect(installSkills).toHaveBeenCalledWith(SKILLS_REPO, ["codex"]);
+    expect(io.stdout()).toContain("• Workflows skipped");
+  });
+
+  test("declining skills still asks about the workflows", async () => {
+    const { deps, confirm, installSkills } = setup({ skills: false });
+    expect(await runInit([], deps)).toBe(0);
+    expect(confirm).toHaveBeenCalledWith(WORKFLOWS_QUESTION);
+    expect(installSkills).toHaveBeenCalledTimes(1);
+    expect(installSkills).toHaveBeenCalledWith(WORKFLOWS_REPO, ["codex"]);
+    expect(io.stdout()).toContain("• Skills skipped");
+    expect(io.stdout()).toContain("Tavily workflows ready for codex");
+  });
+
+  test("--skip-workflows installs skills only", async () => {
+    const { deps, confirm, installSkills } = setup();
+    expect(await runInit(["--skip-workflows", "--json"], deps)).toBe(0);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(installSkills).toHaveBeenCalledTimes(1);
+    expect(installSkills).toHaveBeenCalledWith(SKILLS_REPO, ["codex"]);
+    expect(stdoutJson().workflows).toEqual({
+      source: WORKFLOWS_REPO,
+      agents: [],
+      restart_required: false,
+      skipped: true,
+    });
+  });
+
+  test("--yes installs skills and workflows without prompting", async () => {
+    const { deps, confirm, installSkills } = setup();
+    expect(await runInit(["--yes", "--json"], deps)).toBe(0);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(installSkills).toHaveBeenCalledWith(SKILLS_REPO, ["codex"]);
+    expect(installSkills).toHaveBeenCalledWith(WORKFLOWS_REPO, ["codex"]);
+    expect(stdoutJson().workflows).toMatchObject({ agents: ["codex"], skipped: false });
+  });
+
+  test("--skip-skills skips skills and workflows", async () => {
+    const { deps, confirm, installSkills } = setup();
+    expect(await runInit(["--skip-skills", "--json"], deps)).toBe(0);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(installSkills).not.toHaveBeenCalled();
+    expect(stdoutJson()).toMatchObject({ skills: { skipped: true }, workflows: { skipped: true } });
+  });
+
+  test("a workflows install failure is stage workflows, exit one", async () => {
+    const { deps, installSkills } = setup();
+    installSkills.mockImplementation(async (repo, agents) => {
+      if (repo === WORKFLOWS_REPO) throw new Error("npx skills failed: boom");
+      return { agents, restartRequired: false };
+    });
+    expect(await runInit(["--yes", "--json"], deps)).toBe(1);
+    expect(stdoutJson().error).toEqual({ stage: "workflows", message: "npx skills failed: boom" });
   });
 });
 

@@ -12,6 +12,7 @@ import { runManager, type SpawnFn, whichOnPath } from "../util/process.js";
 import type { AGENT_NAMES } from "./agent-names.js";
 
 export const SKILLS_REPO = "tavily-ai/skills";
+export const WORKFLOWS_REPO = "tavily-ai/official-workflows";
 // Exact version: npx runs whatever this resolves to with the user's permissions.
 const NPX_SKILLS_PACKAGE = "skills@1.7.4";
 
@@ -61,8 +62,9 @@ export function detectAgents(opts: SkillsOptions = {}): AgentName[] {
     .map(([name]) => name);
 }
 
-/** Install every skill in the Tavily skills repo for the selected agents. */
+/** Install every skill in a skills repo (Tavily skills or workflows) for the selected agents. */
 export async function installAgentSkills(
+  repo: string,
   agents: string[],
   deps: SkillsDeps = {},
 ): Promise<SkillsInstallResult> {
@@ -90,7 +92,7 @@ export async function installAgentSkills(
     "--yes",
     NPX_SKILLS_PACKAGE,
     "add",
-    SKILLS_REPO,
+    repo,
     "--skill",
     "*",
     "--global",
