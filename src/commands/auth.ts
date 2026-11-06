@@ -92,7 +92,8 @@ export async function runLogin(
   try {
     const session = await (deps.login ?? runBrowserLogin)({
       openBrowser,
-      ...(json && openBrowser ? {} : { onStatus }),
+      // Always report the URL: a browser launch can fail silently, even in --json mode.
+      onStatus,
       ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
       ...(deps.openImpl ? { openImpl: deps.openImpl } : {}),
     });
