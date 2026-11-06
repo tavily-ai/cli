@@ -155,9 +155,14 @@ test("a JSON-RPC error throws a plain Error with its message", async () => {
 
 test("a body with no data lines is parsed as plain JSON", async () => {
   expect(await make(JSON.stringify({ result: { y: 1 } })).c.search({})).toEqual({ y: 1 });
-  expect(await make(JSON.stringify({ z: 1 })).c.search({})).toEqual({ z: 1 });
   await expect(make(JSON.stringify({ error: { message: "m" } })).c.search({})).rejects.toThrow("m");
   await expect(make("not json").c.search({})).rejects.toThrow("Unexpected MCP response: not json");
+});
+
+test("a plain JSON reply is unwrapped like the SSE form", async () => {
+  const data = { result: { structuredContent: { ok: 1 } } };
+  expect(await make(JSON.stringify(data)).c.search({})).toEqual({ ok: 1 });
+  expect(await make(sse(data)).c.search({})).toEqual({ ok: 1 });
 });
 
 test("non-2xx throws TavilyRequestError with status and body", async () => {
