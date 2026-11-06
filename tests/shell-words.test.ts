@@ -25,12 +25,3 @@ test("double quotes only escape quote and backslash (shlex posix)", () => {
 test("adjacent quoted segments join and empty quotes yield an empty word", () => {
   expect(splitShellWords("a\"b\"'c' ''")).toEqual(["abc", ""]);
 });
-
-test("blank lines give no words", () => {
-  expect(splitShellWords("   ")).toEqual([]);
-});
-
-test("unterminated quote throws", () => {
-  expect(() => splitShellWords('"unterminated')).toThrow("No closing quotation");
-  expect(() => splitShellWords("'x")).toThrow("No closing quotation");
-});

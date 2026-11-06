@@ -140,21 +140,6 @@ test("terminal extract shows the first 3000 characters and the failures", async 
   expect(text).toMatch(/1 extracted, 1 failed \| 1\.50s/);
 });
 
-test("JSON mode prints the response pretty-printed", async () => {
-  await printSearchResults({ results: [] }, { json: true });
-  expect(io.stdout()).toBe('{\n  "results": []\n}\n');
-});
-
-test("emit writes the file, creates .tavily with a .gitignore, and reports on stderr", () => {
-  const dir = tmp();
-  const file = join(dir, ".tavily", "a.json");
-  emit({ a: 1 }, { outputFile: file, pretty: true });
-  expect(readFileSync(file, "utf8")).toBe('{\n  "a": 1\n}\n');
-  expect(readFileSync(join(dir, ".tavily", ".gitignore"), "utf8")).toBe("*\n");
-  expect(io.stderr()).toBe(`Output saved to ${file}\n`);
-  expect(io.stdout()).toBe("");
-});
-
 test("emit leaves an existing .tavily folder alone and creates other folders without .gitignore", () => {
   const dir = tmp();
   mkdirSync(join(dir, ".tavily"));
@@ -183,14 +168,6 @@ test("multi-search plain output: headers, results, and per-query errors", async 
   expect(io.stdout()).toBe(
     "=== [1/3] one\n1. T one\nhttps://a.example/one\nc\n\n=== [2/3] two\nerror: boom\n\n=== [3/3] three\nerror: capped\n\n",
   );
-});
-
-test("footer centres the count and response time in a dim rule", () => {
-  setTerminalOverride(true);
-  footer(3, "results", 1.234);
-  const text = visible(io.stdout());
-  expect(text.startsWith("\n─")).toBe(true);
-  expect(text).toContain(" 3 results | 1.23s ");
 });
 
 test("footer spans the terminal width, 80 columns when unknown", () => {

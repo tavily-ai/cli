@@ -190,20 +190,6 @@ describe("install.sh", () => {
     );
   });
 
-  test("existing npm install upgrades with npm install -g @tavily/cli@latest", () => {
-    const box = sandbox({ owner: "npm" });
-    const result = runPlain(box);
-
-    expect(result.status).toBe(0);
-    expect(box.calls()).toEqual([
-      "npm ls -g --depth=0 @tavily/cli",
-      "npm install -g @tavily/cli@latest",
-      "tvly --version",
-      "npm ls -g --depth=0 @tavily/cli",
-    ]);
-    expect(result.stdout).not.toContain("shadowing");
-  });
-
   test("an older tvly earlier on PATH is reported as shadowing the npm install", () => {
     const box = sandbox({ owner: "npm", tvlyVersion: "0.2.1" });
     const result = runPlain(box);
@@ -287,17 +273,10 @@ describe("install.sh", () => {
     expect(box.calls()).toEqual([]);
   });
 
-  test("node 18 prints a version error and exits 1", () => {
-    const box = sandbox({ node: "18.19.0" });
-    const result = runPlain(box);
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("Node.js 20.1+ is required");
-    expect(box.calls()).toEqual([]);
-  });
-
   test("node 20.0 is rejected and 20.1 accepted", () => {
-    expect(runPlain(sandbox({ node: "20.0.0" })).status).toBe(1);
+    const old = runPlain(sandbox({ node: "20.0.0" }));
+    expect(old.status).toBe(1);
+    expect(old.stderr).toContain("Node.js 20.1+ is required");
     expect(runPlain(sandbox({ node: "20.1.0" })).status).toBe(0);
   });
 });

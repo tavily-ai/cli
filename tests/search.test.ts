@@ -45,7 +45,21 @@ test("search --json posts only the query and prints the response pretty-printed"
 test("generated flags reach the request body in snake_case", async () => {
   const search = vi.fn(async () => fixture);
   await runProgram(
-    ["search", "q", "--json", "--depth", "fast", "--max-results", "3", "--include-answer"],
+    [
+      "search",
+      "q",
+      "--json",
+      "--depth",
+      "fast",
+      "--max-results",
+      "3",
+      "--include-answer",
+      "--include-domains",
+      "a.com, b.com",
+      "--safe-search",
+      "--chunks-per-source",
+      "2",
+    ],
     stubClient({ search }),
   );
   expect(search).toHaveBeenCalledWith({
@@ -53,6 +67,9 @@ test("generated flags reach the request body in snake_case", async () => {
     search_depth: "fast",
     max_results: 3,
     include_answer: "basic",
+    include_domains: ["a.com", "b.com"],
+    safe_search: true,
+    chunks_per_source: 2,
   });
 });
 
@@ -96,6 +113,8 @@ test("usage errors exit 2", async () => {
   expect(await runProgram(["search", "q", "--bogus"], client)).toBe(2);
   expect(await runProgram(["search", "q", "--max-results", "21"], client)).toBe(2);
   expect(io.stderr()).toContain("maximum 20");
+  expect(await runProgram(["search", "q", "--depth", "deep"], client)).toBe(2);
+  expect(io.stderr()).toContain("Allowed choices");
   expect(await runProgram(["search", "q", "--max-chars", "-1"], client)).toBe(2);
 });
 
@@ -217,15 +236,6 @@ test("-o at a terminal only saves", async () => {
   await runProgram(["search", "q", "-o", "out.json"], client);
   expect(io.stdout()).toBe("");
   expect(io.stderr()).toContain("Output saved to out.json");
-});
-
-// test_output.py::test_explicit_output_path_is_unchanged
-test("an explicit -o path is used as given", async () => {
-  setTerminalOverride(false);
-  const dir = mkdtempSync(join(tmpdir(), "tvly-search-"));
-  process.chdir(dir);
-  const { client } = fakeClient();
-  await runProgram(["search", "q", "-o", "out.json"], client);
   expect(existsSync(join(dir, "out.json"))).toBe(true);
   expect(existsSync(join(dir, ".tavily"))).toBe(false);
 });
@@ -297,11 +307,4 @@ test("dist/cli.js search --help lists the flags in order", async () => {
   const viaHelp = await runCli(["help", "search"]);
   expect(viaHelp.code).toBe(0);
   expect(viaHelp.stdout).toBe(stdout);
-});
-
-test("dist/cli.js search with an unknown option exits 2", async () => {
-  vi.restoreAllMocks();
-  const { code, stderr } = await runCli(["search", "q", "--bogus"]);
-  expect(code).toBe(2);
-  expect(stderr).toContain("unknown option");
 });

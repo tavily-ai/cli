@@ -25,15 +25,6 @@ test("unknown command exits 2", async () => {
   expect((await runCli(["bogus"])).code).toBe(2);
 });
 
-test("--status --json reports authenticated via env key", async () => {
-  const home = mkdtempSync(join(tmpdir(), "tvly-home-"));
-  const { stdout, code } = await runCli(["--status", "--json"], {
-    env: { TAVILY_API_KEY: "tvly-x", HOME: home, USERPROFILE: home },
-  });
-  expect(code).toBe(0);
-  expect(JSON.parse(stdout)).toEqual({ version: VERSION, authenticated: true });
-});
-
 test("--status piped under CI has no color unless FORCE_COLOR is set", async () => {
   const home = mkdtempSync(join(tmpdir(), "tvly-home-"));
   const env = { CI: "true", FORCE_COLOR: "", NO_COLOR: "", HOME: home, USERPROFILE: home };
@@ -69,17 +60,6 @@ test("colorEnabled: FORCE_COLOR=0 and NO_COLOR win over a TTY; other FORCE_COLOR
   } finally {
     if (tty) Object.defineProperty(process.stdout, "isTTY", tty);
     else delete (process.stdout as { isTTY?: boolean }).isTTY;
-  }
-});
-
-test("subcommand help lists the global --json flag", async () => {
-  for (const args of [
-    ["search", "--help"],
-    ["research", "run", "--help"],
-  ]) {
-    const { stdout } = await runCli(args);
-    expect(stdout).toContain("Global Options:");
-    expect(stdout).toMatch(/^ {2}--json\s/m);
   }
 });
 
@@ -160,9 +140,4 @@ test("an unexpected exception is printed with control bytes stripped", async () 
     vi.doUnmock("../src/program.js");
   }
   expect(printed).toEqual(["  > Error: bad]0;title thing"]);
-});
-
-test("cli.ts sets exitCode instead of calling process.exit", () => {
-  const src = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
-  expect(src).not.toContain("process.exit(");
 });

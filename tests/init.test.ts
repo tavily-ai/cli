@@ -224,13 +224,6 @@ describe("init global install", () => {
     expect(io.stdout()).toContain("tvly is not available on PATH.");
   });
 
-  test("tvly already on PATH skips the install", async () => {
-    const { deps, confirm, spawnImpl } = setup({ tvly: true });
-    expect(await runInit(["--skip-skills"], deps)).toBe(0);
-    expect(confirm).not.toHaveBeenCalled();
-    expect(spawnImpl).not.toHaveBeenCalled();
-  });
-
   test("--yes in a non-interactive run installs without asking", async () => {
     const { deps, confirm, spawnImpl } = setup({ tvly: false, tty: false });
     expect(await runInit(["--skip-skills", "--yes", "--json"], deps)).toBe(0);

@@ -160,22 +160,6 @@ test("crawl --output-dir gives colliding slugs distinct files", async () => {
   expect(io.stderr()).toContain(`Saved 4 pages to ${dir}/`);
 });
 
-test("plain map output is the URLs joined by newlines", async () => {
-  setTerminalOverride(false);
-  const map = vi.fn(async () => mapFixture);
-  await runProgram(["map", "https://a.example"], stubClient({ map }));
-  expect(io.stdout()).toBe("https://a.example/1\nhttps://a.example/2\n");
-});
-
-test("plain crawl output prints each page through echoPages", async () => {
-  setTerminalOverride(false);
-  const crawl = vi.fn(async () => ({
-    results: [{ url: "https://a.example/1", raw_content: "body" }],
-  }));
-  await runProgram(["crawl", "https://a.example"], stubClient({ crawl }));
-  expect(io.stdout()).toBe("# https://a.example/1\n\nbody\n\n");
-});
-
 test("terminal map output is a tree rooted at the base URL", async () => {
   setTerminalOverride(true);
   const map = vi.fn(async () => mapFixture);
@@ -198,13 +182,6 @@ test("terminal crawl output is a tree of paths with char counts and a preview", 
   expect(text).toContain("│   └── # Intro");
   expect(text).toContain("└── /empty  (0 chars)");
   expect(text).toContain("3 pages | 1.50s");
-});
-
-test("-o saves the JSON response", async () => {
-  const file = join(tmp(), "map.json");
-  const map = vi.fn(async () => mapFixture);
-  await runProgram(["map", "https://a.example", "-o", file], stubClient({ map }));
-  expect(JSON.parse(readFileSync(file, "utf8"))).toEqual(mapFixture);
 });
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the purpose

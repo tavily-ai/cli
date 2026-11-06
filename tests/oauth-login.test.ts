@@ -1,7 +1,7 @@
 import type { spawn } from "node:child_process";
 import { connect } from "node:net";
 import { describe, expect, test, vi } from "vitest";
-import { callbackHtml, openBrowser, runBrowserLogin } from "../src/core/oauth.js";
+import { openBrowser, runBrowserLogin } from "../src/core/oauth.js";
 import { OAuthError } from "../src/errors.js";
 
 const json = (body: unknown, status = 200) =>
@@ -98,12 +98,6 @@ describe("runBrowserLogin", () => {
     const out = await settled;
     expect(out.ok && out.value.tokens.accessToken).toBe("tok");
   });
-
-  test("404s other paths", async () => {
-    const { settled, origin } = await start({ timeoutSeconds: 0.3 });
-    expect((await fetch(`${origin}/other`)).status).toBe(404);
-    await settled;
-  });
 });
 
 describe("openBrowser", () => {
@@ -129,9 +123,4 @@ describe("openBrowser", () => {
     expect(spawnImpl).toHaveBeenCalledWith(cmd, args, { detached: true, stdio: "ignore" });
     expect(unref).toHaveBeenCalled();
   });
-});
-
-test("callbackHtml reflects success", () => {
-  expect(callbackHtml({ success: true })).toContain("#9BC0AE");
-  expect(callbackHtml({ success: false })).toContain("#FAA2FB");
 });

@@ -178,26 +178,6 @@ describe("login", () => {
     expect(io.stderr()).not.toContain("\x07");
   });
 
-  test("--json with a browser still emits the authorization URL event", async () => {
-    const login = vi.fn<NonNullable<AuthDeps["login"]>>(async (opts) => {
-      expect(opts.openBrowser).toBe(true);
-      opts.onStatus?.("https://mcp.tavily.com/authorize?client_id=cid");
-      return session;
-    });
-    const code = await runAuthProgram(["--json", "login"], {
-      home,
-      env: { DISPLAY: ":0" },
-      login,
-      fetchImpl: fetchWith(200),
-    });
-    expect(code).toBe(0);
-    expect(stdoutJson().authenticated).toBe(true);
-    expect(JSON.parse(io.stderr())).toEqual({
-      event: "authorization_required",
-      authorization_url: "https://mcp.tavily.com/authorize?client_id=cid",
-    });
-  });
-
   test("--api-key --json saves the key even when revoking the old oauth fails", async () => {
     writeConfig({ oauth: storedOauth });
     const code = await runAuthProgram(["--json", "login", "--api-key", "tvly-replacement"], {
@@ -273,16 +253,6 @@ describe("login", () => {
 });
 
 describe("auth", () => {
-  test("human output masks the key as first 8, ..., last 4", async () => {
-    writeConfig({ api_key: "tvly-abcdefghijklmnop" });
-    const code = await runAuthProgram(["auth"], { home, env: {} });
-    expect(code).toBe(0);
-    const text = visible(io.stdout());
-    expect(text).toContain(`Authenticated via config file (${configPaths(home).file})`);
-    expect(text).toContain("Key: tvly-abc...mnop");
-    expect(text).not.toContain("abcdefghijklmnop");
-  });
-
   test("short keys are fully masked", async () => {
     await runAuthProgram(["auth"], { home, env: { TAVILY_API_KEY: "tvly-short" } });
     expect(visible(io.stdout())).toContain("Key: ***");

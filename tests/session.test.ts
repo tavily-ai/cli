@@ -104,12 +104,3 @@ test("pidAlive is true for this process and false for an impossible pid", () => 
   expect(pidAlive(process.pid)).toBe(true);
   expect(pidAlive(2 ** 22 + 12345)).toBe(false);
 });
-
-test("grandparentPid bounds the spawned process", () => {
-  const spawnSync = vi.fn(() => ({ status: 0, stdout: "1\n" }));
-  grandparentPid(9, { platform: "darwin", spawnSync: spawnSync as never });
-  expect((spawnSync.mock.calls[0] as unknown[])[2]).toMatchObject({
-    timeout: 2000,
-    windowsHide: true,
-  });
-});

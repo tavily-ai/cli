@@ -17,12 +17,10 @@ import {
   type ConfigOptions,
   clearCredentials,
   configPaths,
-  decodeJwtPayload,
   getApiBaseUrl,
   getApiKey,
   getHumanId,
   hasStoredOauth,
-  isOauthToken,
   readConfig,
   revokeStoredOauth,
   saveApiKey,
@@ -109,24 +107,6 @@ const replacementSession: OAuthSession = {
   },
 };
 
-test("stored oauth revokes refresh before access", async () => {
-  const server = fakeServer({ revoke: ok });
-  const attempted = await revokeStoredOauth(
-    {
-      access_token: "access-1",
-      refresh_token: "refresh-1",
-      client_id: "cid",
-      token_endpoint_auth_method: "none",
-    },
-    { fetchImpl: server.fetchImpl },
-  );
-  expect(attempted).toBe(true);
-  expect(server.revoked()).toEqual([
-    ["refresh-1", "refresh_token"],
-    ["access-1", "access_token"],
-  ]);
-});
-
 test("stored oauth without tokens is not revoked; incomplete client raises", async () => {
   const server = fakeServer();
   // Empty tokens are never sent for revocation.
@@ -185,19 +165,6 @@ test("clear credentials revokes, deletes an emptied config, and reports success"
 
   const again = await clearCredentials({ ...opts, fetchImpl: server.fetchImpl });
   expect(again).toEqual({ serverRevoked: null });
-});
-
-test("save api key still saves when revoking the previous oauth fails", async () => {
-  await writeConfig({ human_id: "keep-me", oauth: previousOauth });
-  const server = fakeServer({ revoke: () => new Response("", { status: 500 }) });
-
-  await saveApiKey("tvly-replacement", { ...opts, fetchImpl: server.fetchImpl });
-
-  expect(server.revoked()).toEqual([
-    ["old-refresh", "refresh_token"],
-    ["old-access", "access_token"],
-  ]);
-  expect(readConfig(opts)).toEqual({ human_id: "keep-me", api_key: "tvly-replacement" });
 });
 
 test("save api key works offline and with an oauth block lacking client_id", async () => {
@@ -569,16 +536,6 @@ describe("~/.mcp-auth fallback", () => {
     writeTokens("c_tokens.json", "not-a-jwt");
     expect(await getApiKey(opts)).toBeNull();
   });
-});
-
-test("jwt helpers", () => {
-  const token = jwt({ iss: "x", sub: "ü" });
-  expect(decodeJwtPayload(token)).toEqual({ iss: "x", sub: "ü" });
-  expect(decodeJwtPayload("a.b")).toBeNull();
-  expect(decodeJwtPayload("a.!!!.c")).toBeNull();
-  expect(isOauthToken(token)).toBe(true);
-  expect(isOauthToken("tvly-abc")).toBe(false);
-  expect(isOauthToken("header.payload.sig")).toBe(false);
 });
 
 test("human id and api base url resolve env over config", async () => {

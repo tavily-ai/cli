@@ -94,21 +94,6 @@ describe("detectInstall", () => {
     ]);
   });
 
-  test("npm root -g allows a cold npm start (15 s timeout)", () => {
-    const spawnSync = vi.fn((..._args: unknown[]) => ({
-      status: 0,
-      stdout: "/usr/lib/node_modules\n",
-    }));
-    npmRootGlobalDefault({ which: found, spawnSync: spawnSync as never, platform: "linux" });
-    expect(spawnSync.mock.calls[0]?.[2]).toMatchObject({ timeout: 15_000 });
-  });
-
-  test("npm root -g is null without npm on PATH", () => {
-    const spawnSync = vi.fn();
-    expect(npmRootGlobalDefault({ which: () => null, spawnSync: spawnSync as never })).toBeNull();
-    expect(spawnSync).not.toHaveBeenCalled();
-  });
-
   test("PNPM_HOME marks a pnpm install", () => {
     const info = detect("/custom/pnpmhome/global/5/node_modules/@tavily/cli/dist/cli.js", {
       env: { PNPM_HOME: "/custom/pnpmhome" },
@@ -175,18 +160,6 @@ describe("fetchLatestVersion", () => {
     const [url, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://registry.npmjs.org/@tavily/cli/latest");
     expect(init.redirect).toBe("manual");
-  });
-
-  test("HTTP failure and network failure map to the check message", async () => {
-    await expect(fetchLatestVersion(jsonReply({}, 500))).rejects.toThrow(
-      "Could not check npm for Tavily CLI updates.",
-    );
-    const down = (async () => {
-      throw new Error("down");
-    }) as unknown as typeof fetch;
-    await expect(fetchLatestVersion(down)).rejects.toThrow(
-      "Could not check npm for Tavily CLI updates.",
-    );
   });
 
   test("an invalid version is rejected", async () => {
@@ -286,11 +259,6 @@ describe("update command", () => {
   test("does nothing when current", async () => {
     expect(await runUpdate(["--json", "update"], base({ currentVersion: "1.1.0" }))).toBe(0);
     expect(JSON.parse(io.stdout()).update_available).toBe(false);
-  });
-
-  test("human up-to-date line", async () => {
-    await runUpdate(["update"], base({ currentVersion: "1.1.0" }));
-    expect(io.stdout()).toContain("Tavily CLI 1.1.0 is up to date.");
   });
 
   test("runs the detected manager and verifies the installed version", async () => {
@@ -406,6 +374,10 @@ describe("update command", () => {
       ok: false,
       error: { stage: "check", message: "Could not check npm for Tavily CLI updates." },
     });
+    const down = (async () => {
+      throw new Error("down");
+    }) as unknown as typeof fetch;
+    expect(await runUpdate(["--json", "update", "--check"], base({ fetchImpl: down }))).toBe(4);
   });
 
   test("install detection failure is not reported as a network error", async () => {

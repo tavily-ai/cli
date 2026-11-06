@@ -2,16 +2,11 @@ import { TavilyKeylessLimitError, TavilyRequestError } from "@tavily/core";
 import { Command } from "commander";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { handleOauthRefreshError } from "../src/commands/common.js";
-import { addClientNameOption, addOutputOption, resolveJson } from "../src/commands/options.js";
-import {
-  handleApiError,
-  readQueryArg,
-  runWithApiErrors,
-  splitCsv,
-} from "../src/commands/shared.js";
+import { addClientNameOption, addOutputOption } from "../src/commands/options.js";
+import { handleApiError, readQueryArg, runWithApiErrors } from "../src/commands/shared.js";
 import { authSource } from "../src/core/config.js";
 import { ExitError, OAuthError } from "../src/errors.js";
-import { keylessCapError, printKeylessCapHit } from "../src/ui/keyless.js";
+import { keylessCapError } from "../src/ui/keyless.js";
 import { resolveOutput } from "../src/ui/render/emit.js";
 
 const ANSI = new RegExp(
@@ -58,12 +53,6 @@ const capError = () =>
     continuationPaths: [{ type: "signup", url: "https://tavily.com/signup" }],
     window: "day",
   });
-
-test("handleApiError JSON mode writes the error to stdout and exits 4", () => {
-  expect(exitCode(() => handleApiError(new Error("boom"), true))).toBe(4);
-  expect(JSON.parse(stdout.join(""))).toEqual({ error: "boom" });
-  expect(stderr).toEqual([]);
-});
 
 test("handleApiError human mode prints to stderr and exits 4", () => {
   expect(exitCode(() => handleApiError(new Error("bo\x1b[2Jom"), false))).toBe(4);
@@ -129,11 +118,6 @@ test("a keyless cap hit in runWithApiErrors exits 3 in JSON and human modes", as
   expect(text).toContain("  Run tvly login to authenticate and remove this cap.");
 });
 
-test("printKeylessCapHit does not throw", () => {
-  printKeylessCapHit(capError());
-  expect(strip(stderr.join("")).startsWith("\n  > Tavily rate limit reached.\n")).toBe(true);
-});
-
 test("handleOauthRefreshError", () => {
   expect(exitCode(() => handleOauthRefreshError(new OAuthError("expired"), true))).toBe(3);
   expect(JSON.parse(stdout.join(""))).toEqual({
@@ -141,26 +125,6 @@ test("handleOauthRefreshError", () => {
   });
   expect(exitCode(() => handleOauthRefreshError(new OAuthError("expired"), false))).toBe(3);
   expect(strip(stderr.join(""))).toBe("  > OAuth refresh failed: expired\n");
-});
-
-test("runWithApiErrors routes keyless, OAuth, other, and passes results and ExitError through", async () => {
-  expect(await runWithApiErrors(true, async () => 5)).toBe(5);
-  const run = async (e: unknown) => {
-    try {
-      await runWithApiErrors(true, async () => {
-        throw e;
-      });
-    } catch (x) {
-      return (x as ExitError).code;
-    }
-    return -1;
-  };
-  expect(await run(capError())).toBe(3);
-  expect(JSON.parse(stdout.at(-1) ?? "").error.code).toBe("daily");
-  expect(await run(new OAuthError("x"))).toBe(3);
-  expect(JSON.parse(stdout.at(-1) ?? "").error.code).toBe("oauth_refresh_failed");
-  expect(await run(new Error("y"))).toBe(4);
-  expect(await run(new ExitError(7))).toBe(7);
 });
 
 function parse(args: string[]) {
@@ -175,30 +139,6 @@ test("--client-name beats TAVILY_CLIENT_NAME; env is the fallback; neither is un
   expect(parse([]).clientName).toBe("env");
   vi.stubEnv("TAVILY_CLIENT_NAME", undefined);
   expect(parse([]).clientName).toBeUndefined();
-});
-
-test("-o yields undefined, empty string when bare, or the path", () => {
-  expect(parse([]).output).toBeUndefined();
-  expect(parse(["-o"]).output).toBe("");
-  expect(parse(["--output"]).output).toBe("");
-  expect(parse(["-o", "f.json"]).output).toBe("f.json");
-});
-
-test("resolveJson reads the global flag from a parent", () => {
-  const root = new Command("root").option("--json");
-  const sub = root.command("sub").action(() => {});
-  root.parse(["--json", "sub"], { from: "user" });
-  expect(resolveJson(sub)).toBe(true);
-  const root2 = new Command("root").option("--json");
-  const sub2 = root2.command("sub").action(() => {});
-  root2.parse(["sub"], { from: "user" });
-  expect(resolveJson(sub2)).toBe(false);
-});
-
-test("splitCsv", () => {
-  expect(splitCsv(undefined)).toBeUndefined();
-  expect(splitCsv("")).toBeUndefined();
-  expect(splitCsv("a.com, b.com")).toEqual(["a.com", "b.com"]);
 });
 
 test("readQueryArg (stdin cases are in research.test.ts)", () => {

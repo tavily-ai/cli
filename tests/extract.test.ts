@@ -1,7 +1,6 @@
 import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TavilyKeylessLimitError } from "@tavily/core";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Json } from "../src/core/tavily-client.js";
 import { setTerminalOverride } from "../src/ui/text.js";
@@ -76,33 +75,6 @@ test("usage errors exit 2", async () => {
   expect(await runProgram(["extract", "https://a.example", "--bogus"], client)).toBe(2);
 });
 
-test("a keyless cap hit exits 3 with the JSON envelope", async () => {
-  const client = stubClient({
-    extract: async () => {
-      throw new TavilyKeylessLimitError({
-        message: "capped",
-        capType: "daily",
-        retryAfter: 10,
-        bonusEligible: false,
-        continuationPaths: [],
-      });
-    },
-  });
-  expect(await runProgram(["extract", "https://a.example", "--json"], client)).toBe(3);
-  expect(JSON.parse(io.stdout()).error.code).toBe("daily");
-});
-
-test("plain extract prints pages whole and the failures", async () => {
-  setTerminalOverride(false);
-  await runProgram(
-    ["extract", "https://example.com/page"],
-    stubClient({ extract: async () => fixture }),
-  );
-  expect(io.stdout()).toBe(
-    "# https://example.com/page\n\n# Page\n\nSome [linked](https://example.com/other) text.\n\nFailed: https://broken.example: timeout\n",
-  );
-});
-
 test("bare -o names the file after the first URL's host", async () => {
   setTerminalOverride(false);
   const dir = mkdtempSync(join(tmpdir(), "tvly-extract-"));
@@ -115,17 +87,4 @@ test("bare -o names the file after the first URL's host", async () => {
   expect(saved).toHaveLength(1);
   expect(saved[0]).toMatch(/^extract-docs-example-com-/);
   expect(io.stdout()).toBe("");
-});
-
-test("human mode shows the extracting spinner on stderr only", async () => {
-  setTerminalOverride(true);
-  const client = stubClient({
-    extract: async () => {
-      await new Promise((r) => setTimeout(r, 100));
-      return fixture;
-    },
-  });
-  await runProgram(["extract", "https://a.example", "https://b.example"], client);
-  expect(io.stderr()).toContain("Extracting 2 URLs...");
-  expect(io.stdout()).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/);
 });

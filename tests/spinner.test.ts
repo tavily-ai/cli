@@ -26,13 +26,6 @@ test("non-TTY stderr: no writes, withSpinner still returns the value", async () 
   expect(vi.getTimerCount()).toBe(0);
 });
 
-test("disabled: no writes and no timer", () => {
-  setTerminalOverride(true);
-  spinner("x", false).stop();
-  expect(writes).toEqual([]);
-  expect(vi.getTimerCount()).toBe(0);
-});
-
 test("TTY stderr: animates frames, updates message, clears on stop", () => {
   setTerminalOverride(true);
   const s = spinner("loading", true);

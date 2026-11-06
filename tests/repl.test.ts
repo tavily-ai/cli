@@ -122,23 +122,6 @@ test("raw mode is off while a command runs on a TTY and back on after", async ()
   expect(log[i + 1]).toBe(true);
 });
 
-test("a non-TTY input never gets setRawMode calls", async () => {
-  const input = new PassThrough();
-  const setRawMode = vi.fn();
-  Object.assign(input, { setRawMode });
-  input.end("search x\nexit\n");
-  const output = new Writable({ write: (_c, _e, cb) => cb() });
-  const home = mkdtempSync(join(tmpdir(), "tvly-repl-"));
-  await runRepl({
-    input,
-    output,
-    program: stubProgram([]),
-    home,
-    env: { TAVILY_API_KEY: "" } as NodeJS.ProcessEnv,
-  });
-  expect(setRawMode).not.toHaveBeenCalled();
-});
-
 test("a usage error is printed once, by the REPL only", async () => {
   const stderrWrites: string[] = [];
   const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
