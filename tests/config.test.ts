@@ -492,6 +492,15 @@ test.skipIf(process.platform === "win32")("config file is 0600 and directory 070
   const { dir, file } = configPaths(home);
   expect(statSync(dir).mode & 0o777).toBe(0o700);
   expect(statSync(file).mode & 0o777).toBe(0o600);
+  // A umask that strips the owner's write bit still ends at 0600 (the temp file is chmodded
+  // before the rename, which keeps its mode).
+  const previous = process.umask(0o277);
+  try {
+    await saveApiKey("tvly-y", opts);
+  } finally {
+    process.umask(previous);
+  }
+  expect(statSync(file).mode & 0o777).toBe(0o600);
 });
 
 test("a pre-existing 0-byte Python lock file does not block writes", async () => {

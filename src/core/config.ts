@@ -90,7 +90,6 @@ async function writeConfigUnlocked(config: Config, opts: ConfigOptions): Promise
     }
     await chmod(temp, 0o600);
     await fs.rename(temp, file);
-    await chmod(file, 0o600);
   } finally {
     await fs.rm(temp, { force: true });
   }
