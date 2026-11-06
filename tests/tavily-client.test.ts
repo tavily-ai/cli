@@ -1,13 +1,7 @@
 import type { TavilyTransport } from "@tavily/core";
-import { createTransport } from "@tavily/core";
-import { expect, test, vi } from "vitest";
+import { expect, test } from "vitest";
 import { sseDataLines } from "../src/core/sse.js";
 import { createTavilyClient } from "../src/core/tavily-client.js";
-
-vi.mock("@tavily/core", async (orig) => {
-  const mod = await orig<typeof import("@tavily/core")>();
-  return { ...mod, createTransport: vi.fn(() => ({})) };
-});
 
 type Call = { method: string; endpoint: string; body?: unknown; opts?: unknown };
 
@@ -36,32 +30,6 @@ function client(apiKey?: string) {
   const s = stub();
   return { ...s, c: createTavilyClient({ apiKey, sessionId: "s", transport: s.transport }) };
 }
-
-test("clientSource, apiBaseUrl and ids are passed to createTransport", () => {
-  const mocked = vi.mocked(createTransport);
-  vi.stubEnv("TAVILY_PROJECT", "p");
-  vi.stubEnv("TAVILY_ORG_ID", "o");
-  createTavilyClient({
-    apiKey: "k",
-    sessionId: "s",
-    humanId: "h",
-    clientName: "n",
-    apiBaseUrl: "https://x.test",
-  });
-  vi.unstubAllEnvs();
-  expect(mocked.mock.calls[0]?.[0]).toMatchObject({
-    apiKey: "k",
-    clientSource: "tavily-cli",
-    apiBaseURL: "https://x.test",
-    sessionId: "s",
-    humanId: "h",
-    clientName: "n",
-    projectId: "p",
-    orgId: "o",
-  });
-  createTavilyClient({ sessionId: "s" });
-  expect(mocked.mock.calls[1]?.[0]).toMatchObject({ clientSource: "tavily-cli-keyless" });
-});
 
 test("default timeouts and body defaults", async () => {
   const { c, calls } = client("k");

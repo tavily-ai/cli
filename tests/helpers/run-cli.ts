@@ -11,12 +11,18 @@ export interface CliResult {
 
 export interface RunOptions {
   env?: Record<string, string>;
+  /** Start from an empty environment (PATH only), so no TAVILY_* or HOME leaks in from this one. */
+  isolated?: boolean;
+  /** A module to `node --import` before the CLI, such as fetch-redirect.mjs. */
+  preload?: string;
 }
 
 export function runCli(args: string[], opts: RunOptions = {}): Promise<CliResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [CLI, ...args], {
-      env: { ...process.env, ...opts.env },
+    const preload = opts.preload ? ["--import", opts.preload] : [];
+    const base = opts.isolated ? { PATH: process.env.PATH ?? "" } : process.env;
+    const child = spawn(process.execPath, [...preload, CLI, ...args], {
+      env: { ...base, ...opts.env },
     });
     let stdout = "";
     let stderr = "";
