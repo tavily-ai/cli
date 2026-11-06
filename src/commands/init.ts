@@ -25,12 +25,12 @@ import {
   installAgentSkills,
   SKILLS_REPO,
   type SkillsInstallResult,
-  whichOnPath,
 } from "../core/skills.js";
 import type { TavilyClientLike } from "../core/tavily-client.js";
 import { ExitError, messageOf } from "../errors.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
+import { whichOnPath } from "../util/process.js";
 import { VERSION } from "../version.js";
 import { promptConfirm, resolveJson } from "./options.js";
 

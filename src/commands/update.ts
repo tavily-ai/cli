@@ -6,15 +6,10 @@ import { detectInstall, fetchLatestVersion, type InstallInfo } from "../core/ins
 import { ExitError, messageOf } from "../errors.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
+import { runManager, type SpawnFn } from "../util/process.js";
 import { compareVersions, isNewer } from "../util/semver.js";
 import { VERSION } from "../version.js";
 import { resolveJson } from "./options.js";
-
-export type SpawnFn = (
-  command: string,
-  args: string[],
-  options: childProcess.SpawnSyncOptions,
-) => childProcess.SpawnSyncReturns<string | Buffer>;
 
 export interface UpdateDeps {
   currentVersion?: string;
@@ -62,18 +57,14 @@ export async function run(opts: UpdateOptions, cmd: Command, deps: UpdateDeps = 
   if (!json) out(`Updating Tavily CLI via ${install.method}...`);
 
   const spawnImpl: SpawnFn = deps.spawnImpl ?? childProcess.spawnSync;
-  // The manager's resolved path; Windows runs its .cmd shim through the shell, so it is quoted.
+  // The manager's resolved path; Windows runs its .cmd shim through the shell.
   const [file = "", ...args] = install.command;
-  const win = (deps.platform ?? process.platform) === "win32";
-  const completed = spawnImpl(win ? `"${file}"` : file, args, {
-    stdio: ["ignore", "pipe", "pipe"],
-    encoding: "utf8",
-    timeout: 300_000,
-    maxBuffer: 16 * 1024 * 1024,
-    windowsHide: true,
-    // The arguments contain no spaces or quotes.
-    shell: win,
-  });
+  const completed = runManager(
+    spawnImpl,
+    file,
+    args,
+    (deps.platform ?? process.platform) === "win32",
+  );
   if (completed.error) {
     return fail("update", completed.error.message, 1, json);
   }

@@ -77,6 +77,19 @@ describe("installAgentSkills", () => {
 
     expect((await run(fakeNpx(home, calls))).restartRequired).toBe(false);
     expect((await run(fakeNpx(home, calls, { content: "new" }))).restartRequired).toBe(true);
+
+    // A removed or newly added (even empty) skill directory counts; no change does not.
+    const removeSkill = (() => {
+      rmSync(path.join(home, ".agents", "skills", "tavily-search"), { recursive: true });
+      return result(0);
+    }) as never;
+    expect((await run(removeSkill)).restartRequired).toBe(true);
+    const addEmptySkill = (() => {
+      mkdirSync(path.join(home, ".agents", "skills", "empty"));
+      return result(0);
+    }) as never;
+    expect((await run(addEmptySkill)).restartRequired).toBe(true);
+    expect((await run((() => result(0)) as never)).restartRequired).toBe(false);
   });
 
   it("counts new agent links", async () => {
