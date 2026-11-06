@@ -10,7 +10,7 @@ import { spinner, withSpinner } from "../ui/spinner.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
 import { resolveJson } from "./options.js";
-import { readQueryArg, runWithApiErrors } from "./shared.js";
+import { handleApiError, readQueryArg, runWithApiErrors } from "./shared.js";
 
 export interface PollOptions {
   pollInterval: number;
@@ -59,43 +59,48 @@ async function connect(cmd: Command, label: string, clientName: string | undefin
 }
 
 /**
- * Poll until the task completes or fails; undefined on timeout. JSON mode sleeps `pollInterval`
- * seconds (at least 1) between checks; human mode ticks every second with an elapsed-time spinner. The spinner
- * stops before any API error propagates to the caller's `runWithApiErrors`.
+ * Poll every `pollInterval` seconds (at least 1) until the task completes or fails; undefined once
+ * `timeout` seconds of wall time pass. Ticks every second so human mode's elapsed-time spinner stays
+ * current; the spinner stops before any API error reaches the caller's `runWithApiErrors`.
  */
 async function waitForResult(
   client: TavilyClientLike,
   requestId: string,
   opts: { json: boolean; pollInterval: number; timeout: number; label: string },
 ): Promise<Json | undefined> {
-  if (opts.json) {
-    const deadline = Date.now() + opts.timeout * 1000;
-    while (Date.now() < deadline) {
-      const response = await client.getResearch(requestId);
-      if (isDone(response)) return response;
-      await sleep(Math.max(1, opts.pollInterval) * 1000);
-    }
-    return undefined;
-  }
-  let elapsed = 0;
-  const message = () => colors.aqua(`${opts.label}... ${elapsed}s elapsed`);
-  const live = spinner(message(), true);
+  const start = Date.now();
+  const deadline = start + opts.timeout * 1000;
+  const message = () =>
+    colors.aqua(`${opts.label}... ${Math.floor((Date.now() - start) / 1000)}s elapsed`);
+  const live = spinner(message(), !opts.json);
   try {
-    let nextPoll = 0;
-    while (elapsed < opts.timeout) {
+    let nextPoll = start;
+    while (Date.now() < deadline) {
       live.update(message());
-      if (elapsed >= nextPoll) {
+      if (Date.now() >= nextPoll) {
         const response = await client.getResearch(requestId);
         if (isDone(response)) return response;
-        nextPoll = elapsed + opts.pollInterval;
+        nextPoll = Date.now() + Math.max(1, opts.pollInterval) * 1000;
       }
       await sleep(1000);
-      elapsed += 1;
     }
     return undefined;
   } finally {
     live.stop();
   }
+}
+
+/** Print the finished task, or the timeout notice (followed by `hint` in human mode). */
+async function finishWait(
+  response: Json | undefined,
+  requestId: string,
+  opts: { json: boolean; outputFile: string | undefined; timeout: number },
+  hint = "",
+): Promise<void> {
+  const { json, outputFile } = opts;
+  if (response) return printResearchResult(response, { json, outputFile });
+  if (json) emit({ request_id: requestId, status: "timeout" }, { outputFile, pretty: false });
+  else err(colors.yellow(`Timed out after ${opts.timeout}s.${hint}`));
 }
 
 type StreamEvent = {
@@ -198,10 +203,7 @@ export async function run(
 
   const requestId = result.request_id;
   if (typeof requestId !== "string" || !requestId) {
-    await runWithApiErrors(json, async () => {
-      throw new Error(`Unexpected API response: ${JSON.stringify(result)}`);
-    });
-    return;
+    handleApiError(new Error(`Unexpected API response: ${JSON.stringify(result)}`), json);
   }
 
   if (opts.wait === false) {
@@ -220,18 +222,8 @@ export async function run(
       label: "Researching",
     }),
   );
-  if (response === undefined) {
-    if (json) emit({ request_id: requestId, status: "timeout" }, { outputFile, pretty: false });
-    else {
-      err(
-        colors.yellow(
-          `Timed out after ${opts.timeout}s. Resume with: tvly research poll ${sanitizeControl(requestId)}`,
-        ),
-      );
-    }
-    return;
-  }
-  await printResearchResult(response, { json, outputFile });
+  const hint = ` Resume with: tvly research poll ${sanitizeControl(requestId)}`;
+  await finishWait(response, requestId, { json, outputFile, timeout: opts.timeout }, hint);
 }
 
 const STATUS_COLORS: Record<string, (s: string) => string> = {
@@ -274,10 +266,5 @@ export async function poll(requestId: string, opts: PollOptions, cmd: Command): 
       label,
     }),
   );
-  if (response === undefined) {
-    if (json) emit({ request_id: requestId, status: "timeout" }, { outputFile, pretty: false });
-    else err(colors.yellow(`Timed out after ${opts.timeout}s.`));
-    return;
-  }
-  await printResearchResult(response, { json, outputFile });
+  await finishWait(response, requestId, { json, outputFile, timeout: opts.timeout });
 }
