@@ -48,12 +48,7 @@ export async function runLogin(
   const configFile = configPaths(deps.home).file;
 
   if (opts.apiKey) {
-    try {
-      await saveApiKey(opts.apiKey, config);
-    } catch (e) {
-      if (e instanceof OAuthError) failLogin(e.message, json);
-      throw e;
-    }
+    await saveApiKey(opts.apiKey, config);
     printLoginSuccess("API key", `Saved to ${configFile}`, json);
     return;
   }
@@ -97,7 +92,8 @@ export async function runLogin(
   try {
     const session = await (deps.login ?? runBrowserLogin)({
       openBrowser,
-      ...(json && openBrowser ? {} : { onStatus }),
+      // Always report the URL: a browser launch can fail silently, even in --json mode.
+      onStatus,
       ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
       ...(deps.openImpl ? { openImpl: deps.openImpl } : {}),
     });

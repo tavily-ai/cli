@@ -94,6 +94,15 @@ describe("detectInstall", () => {
     ]);
   });
 
+  test("npm root -g allows a cold npm start (15 s timeout)", () => {
+    const spawnSync = vi.fn((..._args: unknown[]) => ({
+      status: 0,
+      stdout: "/usr/lib/node_modules\n",
+    }));
+    npmRootGlobalDefault({ which: found, spawnSync: spawnSync as never, platform: "linux" });
+    expect(spawnSync.mock.calls[0]?.[2]).toMatchObject({ timeout: 15_000 });
+  });
+
   test("npm root -g is null without npm on PATH", () => {
     const spawnSync = vi.fn();
     expect(npmRootGlobalDefault({ which: () => null, spawnSync: spawnSync as never })).toBeNull();

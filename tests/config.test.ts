@@ -185,21 +185,30 @@ test("clear credentials revokes, deletes an emptied config, and reports success"
   expect(again).toEqual({ localCredentialsCleared: true, serverRevoked: null });
 });
 
-test("save api key keeps previous oauth when revocation fails", async () => {
+test("save api key still saves when revoking the previous oauth fails", async () => {
   await writeConfig({ human_id: "keep-me", oauth: previousOauth });
   const server = fakeServer({ revoke: () => new Response("", { status: 500 }) });
 
-  const err = await saveApiKey("tvly-replacement", { ...opts, fetchImpl: server.fetchImpl }).catch(
-    (e: unknown) => e,
-  );
+  await saveApiKey("tvly-replacement", { ...opts, fetchImpl: server.fetchImpl });
 
-  expect(err).toBeInstanceOf(OAuthError);
-  expect((err as Error).message).toMatch(/Token revocation failed/);
   expect(server.revoked()).toEqual([
     ["old-refresh", "refresh_token"],
     ["old-access", "access_token"],
   ]);
-  expect(readConfig(opts)).toEqual({ human_id: "keep-me", oauth: previousOauth });
+  expect(readConfig(opts)).toEqual({ human_id: "keep-me", api_key: "tvly-replacement" });
+});
+
+test("save api key works offline and with an oauth block lacking client_id", async () => {
+  const offline = (async () => {
+    throw new TypeError("fetch failed");
+  }) as typeof fetch;
+  await writeConfig({ oauth: previousOauth });
+  await saveApiKey("tvly-offline", { ...opts, fetchImpl: offline });
+  expect(readConfig(opts)).toEqual({ api_key: "tvly-offline" });
+
+  await writeConfig({ oauth: { access_token: "a" } });
+  await saveApiKey("tvly-no-client", { ...opts, fetchImpl: offline });
+  expect(readConfig(opts)).toEqual({ api_key: "tvly-no-client" });
 });
 
 test("save oauth session revokes previous before overwrite", async () => {
@@ -453,6 +462,13 @@ test("api key and oauth replace each other", async () => {
 test("environment API key wins over stored credentials", async () => {
   await saveApiKey("tvly-stored", opts);
   expect(await getApiKey({ ...opts, env: { TAVILY_API_KEY: "tvly-env" } })).toBe("tvly-env");
+});
+
+test("getApiKey with an unwritable HOME and no env key resolves keyless instead of throwing", async () => {
+  // A regular file as HOME: ~/.tavily can be neither read nor created.
+  const fileHome = path.join(home, "not-a-dir");
+  writeFileSync(fileHome, "");
+  expect(await getApiKey({ home: fileHome, env: {} })).toBeNull();
 });
 
 test("saving a refreshed session never revokes and drops api_key", async () => {
