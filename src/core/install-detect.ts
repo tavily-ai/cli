@@ -63,7 +63,7 @@ export function npmRootGlobalDefault(deps: {
   try {
     const r = (deps.spawnSync ?? childProcess.spawnSync)(win ? `"${npm}"` : npm, ["root", "-g"], {
       encoding: "utf8",
-      timeout: 2000,
+      timeout: 15_000,
       windowsHide: true,
       shell: win,
     });
