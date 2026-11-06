@@ -1,5 +1,4 @@
 import type * as childProcess from "node:child_process";
-import { CommanderError } from "commander";
 import { describe, expect, test, vi } from "vitest";
 import { run, type UpdateDeps } from "../src/commands/update.js";
 import {
@@ -7,9 +6,9 @@ import {
   fetchLatestVersion,
   npmRootGlobalDefault,
 } from "../src/core/install-detect.js";
-import { ExitError } from "../src/errors.js";
-import { buildProgram } from "../src/program.js";
+import { compareVersions, isNewer } from "../src/util/semver.js";
 import { captureOutput } from "./helpers/capture.js";
+import { runProgram } from "./helpers/program.js";
 
 const io = captureOutput();
 
@@ -187,20 +186,8 @@ const BLOCKED_SOURCE = {
   blockedReason: "This is a source or direct-URL installation. Update it from its original source.",
 };
 
-async function runUpdate(argv: string[], deps: UpdateDeps): Promise<number> {
-  const program = buildProgram();
-  for (const sub of program.commands) {
-    if (sub.name() === "update") sub.action((o, c) => run(o, c, deps));
-  }
-  try {
-    await program.parseAsync(argv, { from: "user" });
-    return 0;
-  } catch (e) {
-    if (e instanceof ExitError) return e.code;
-    if (e instanceof CommanderError) return e.exitCode;
-    throw e;
-  }
-}
+const runUpdate = (argv: string[], deps: UpdateDeps) =>
+  runProgram(argv, undefined, { actions: { update: (o, c) => run(o, c, deps) } });
 
 const neverSpawn: Spawn = () => {
   throw new Error("must not spawn");
@@ -398,5 +385,32 @@ describe("update command", () => {
     await runUpdate(["update"], base({ spawnImpl }));
     expect(io.stderr()).toContain("Update failed:");
     expect(io.stderr()).toContain("boom");
+  });
+});
+
+describe("semver", () => {
+  test("compares numerically per component", () => {
+    expect(compareVersions("0.3.0", "0.2.1")).toBe(1);
+    expect(compareVersions("0.2.1", "0.3.0")).toBe(-1);
+    expect(compareVersions("0.10.0", "0.9.0")).toBe(1);
+    expect(compareVersions("1.2.3", "1.2.3")).toBe(0);
+  });
+
+  test("release ranks above its prerelease", () => {
+    expect(compareVersions("1.0.0", "1.0.0-rc.1")).toBe(1);
+  });
+
+  test("prerelease identifiers compare per identifier", () => {
+    expect(compareVersions("1.0.0-rc.2", "1.0.0-rc.1")).toBe(1);
+    expect(compareVersions("1.0.0-rc.10", "1.0.0-rc.9")).toBe(1);
+    expect(compareVersions("1.0.0-1", "1.0.0-alpha")).toBe(-1);
+    expect(compareVersions("1.0.0-rc", "1.0.0-rc.1")).toBe(-1);
+  });
+
+  test("unparsable versions throw", () => {
+    expect(() => isNewer("0.3.0", "abc")).toThrow("The installed Tavily CLI version is invalid.");
+    expect(() => compareVersions("abc", "1.0.0")).toThrow(
+      "The installed Tavily CLI version is invalid.",
+    );
   });
 });

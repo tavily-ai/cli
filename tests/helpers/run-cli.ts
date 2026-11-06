@@ -11,7 +11,6 @@ export interface CliResult {
 
 export interface RunOptions {
   env?: Record<string, string>;
-  input?: string;
 }
 
 export function runCli(args: string[], opts: RunOptions = {}): Promise<CliResult> {
@@ -29,6 +28,6 @@ export function runCli(args: string[], opts: RunOptions = {}): Promise<CliResult
     });
     child.on("error", reject);
     child.on("close", (code) => resolve({ stdout, stderr, code: code ?? 1 }));
-    child.stdin.end(opts.input ?? "");
+    child.stdin.end();
   });
 }

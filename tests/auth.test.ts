@@ -1,13 +1,11 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CommanderError } from "commander";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { type AuthDeps, runAuth, runLogin, runLogout } from "../src/commands/auth.js";
 import { configPaths, readConfig } from "../src/core/config.js";
 import type { OAuthSession } from "../src/core/oauth.js";
-import { ExitError, OAuthError } from "../src/errors.js";
-import { buildProgram } from "../src/program.js";
+import { OAuthError } from "../src/errors.js";
 import { captureOutput, visible } from "./helpers/capture.js";
 import { clientFactory, runProgram, stubClient } from "./helpers/program.js";
 
@@ -56,22 +54,14 @@ const fetchWith = (revokeStatus: number): typeof fetch =>
   }) as typeof fetch;
 
 /** Run the real program in-process with the auth commands bound to `deps`. */
-async function runAuthProgram(argv: string[], deps: AuthDeps): Promise<number> {
-  const program = buildProgram();
-  for (const sub of program.commands) {
-    if (sub.name() === "login") sub.action((o, c) => runLogin(o, c, deps));
-    if (sub.name() === "logout") sub.action((o, c) => runLogout(o, c, deps));
-    if (sub.name() === "auth") sub.action((o, c) => runAuth(o, c, deps));
-  }
-  try {
-    await program.parseAsync(argv, { from: "user" });
-    return 0;
-  } catch (e) {
-    if (e instanceof ExitError) return e.code;
-    if (e instanceof CommanderError) return e.exitCode === 0 ? 0 : 2;
-    throw e;
-  }
-}
+const runAuthProgram = (argv: string[], deps: AuthDeps) =>
+  runProgram(argv, undefined, {
+    actions: {
+      login: (o, c) => runLogin(o, c, deps),
+      logout: (o, c) => runLogout(o, c, deps),
+      auth: (o, c) => runAuth(o, c, deps),
+    },
+  });
 
 const stdoutJson = () => JSON.parse(io.stdout());
 
