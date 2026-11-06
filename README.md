@@ -20,20 +20,15 @@ CLI and agent tools for the [Tavily API](https://docs.tavily.com) — search, ex
 
 ## Installation
 
-Requires **Node.js 20.1+**.
-
-### Guided installer
-
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tavily-ai/cli/main/install.sh | sh
+npx @tavily/cli init
 ```
 
-On a fresh interactive desktop installation, the installer starts `tvly init`
-to guide authentication, agent detection, skill installation, and verification.
-In CI, SSH/headless, and other non-interactive environments, run `tvly init`
-separately with the [appropriate setup options](#non-interactive-mode-for-ai-agents--scripts).
+This authenticates you, asks to install the Tavily skills for the agents it detects (Claude Code, Codex, Cursor), verifies a live search, and offers to install `tvly` globally so your agents can run it.
 
-### Package manager
+Requires **Node.js 20.1+**.
+
+### Install globally
 
 Choose the package manager you use:
 
@@ -78,12 +73,23 @@ tvly update
 
 Source (`npm link`) and direct-URL installations are detected and must be updated from their original source.
 
+### Shell installer
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tavily-ai/cli/main/install.sh | sh
+```
+
+On a fresh interactive desktop installation, the installer starts `tvly init`
+to guide authentication, agent detection, skill installation, and verification.
+In CI, SSH/headless, and other non-interactive environments, run `tvly init`
+separately with the [appropriate setup options](#non-interactive-mode-for-ai-agents--scripts).
+
 ## Quick Start
 
 ### Initialize Tavily
 
-The guided installer starts setup automatically on a fresh interactive desktop
-installation. After a package-manager, source, or non-interactive install, run:
+Setup starts from `npx @tavily/cli init`. After a package-manager, source, or
+non-interactive install, run:
 
 ```bash
 tvly init
@@ -95,6 +101,7 @@ tvly search "latest AI trends"
 1. **Authentication:** reuse an existing credential or sign in through browser OAuth.
 2. **Agent setup:** detect Claude Code, Codex, and Cursor and install the Tavily agent skills.
 3. **Verification:** check the CLI, then run a live search.
+4. **Global install:** when run through `npx`, offer to install `tvly` globally with `npm install -g @tavily/cli` so your agents can run it.
 
 Skills are installed with the [skills.sh CLI](https://skills.sh)
 (`npx skills add tavily-ai/skills`), so skill setup needs `npx` on your PATH.
