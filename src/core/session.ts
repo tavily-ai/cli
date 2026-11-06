@@ -7,7 +7,7 @@ import { isObject } from "../errors.js";
 
 type Sessions = Record<string, string>;
 
-export interface GrandparentOptions {
+interface GrandparentOptions {
   spawnSync?: typeof childProcess.spawnSync;
   platform?: NodeJS.Platform;
   readFile?: (p: string) => string;

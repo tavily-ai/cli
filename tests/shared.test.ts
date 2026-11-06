@@ -14,7 +14,7 @@ import {
 } from "../src/commands/shared.js";
 import { authSource } from "../src/core/config.js";
 import { ExitError, OAuthError } from "../src/errors.js";
-import { resolveOutput } from "../src/ui/output-file.js";
+import { resolveOutput } from "../src/ui/render/emit.js";
 
 const ANSI = new RegExp(
   `${String.fromCharCode(27)}(\\[[0-9;]*m|\\]8;;[^${String.fromCharCode(27)}]*${String.fromCharCode(27)}\\\\)`,

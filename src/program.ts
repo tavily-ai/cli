@@ -3,6 +3,7 @@ import type { DefaultsOptions } from "./commands/defaults.js";
 import type { InitOptions } from "./commands/init.js";
 import {
   addClientNameOption,
+  addCommonOptions,
   addOutputOption,
   parseNumberArg,
   resolveJson,
@@ -24,6 +25,17 @@ Or set TAVILY_API_KEY environment variable.
 
 const KEYLESS_HELP =
   "\nWorks without an API key (subject to a rate-limit cap). Run `tvly login` to authenticate and remove the cap.";
+
+const int = (raw: string) => parseNumberArg(raw, { integer: true });
+const seconds = (raw: string) => parseNumberArg(raw);
+
+function addExtractOptions(cmd: Command): Command {
+  return cmd
+    .addOption(
+      new Option("--extract-depth <depth>", "Extraction depth.").choices(["basic", "advanced"]),
+    )
+    .addOption(new Option("--format <format>", "Output format.").choices(["markdown", "text"]));
+}
 
 export function buildProgram(): Command {
   const program = new Command("tvly")
@@ -84,13 +96,6 @@ export function buildProgram(): Command {
     .action(async (opts: Record<string, never>, cmd: Command) => {
       await (await authModule()).runAuth(opts, cmd);
     });
-  // search's flags come from the SDK catalog; they are added only when search is dispatched.
-  const configurers = new Map<Command, () => Promise<void>>();
-  const configure = async (cmd: Command) => {
-    const load = configurers.get(cmd);
-    configurers.delete(cmd);
-    await load?.();
-  };
   const searchModule = () => import("./commands/search.js");
   const search = program
     .command("search")
@@ -103,7 +108,13 @@ export function buildProgram(): Command {
     .action(async (queries: string[], opts: Record<string, unknown>, cmd: Command) => {
       await (await searchModule()).run(queries, opts, cmd);
     });
-  configurers.set(search, async () => (await searchModule()).configure(search));
+  // search's flags come from the SDK catalog; they are added only when search is dispatched.
+  let searchConfigured = false;
+  const configure = async (cmd: Command) => {
+    if (cmd !== search || searchConfigured) return;
+    searchConfigured = true;
+    (await searchModule()).configure(search);
+  };
   program.hook("preSubcommand", (_program, sub) => configure(sub));
 
   const extract = program
@@ -111,27 +122,15 @@ export function buildProgram(): Command {
     .description("Extract content from one or more URLs.")
     .argument("<urls...>", "URLs to extract (max 20).")
     .option("--query <query>", "Rerank chunks by relevance to this query.")
-    .option(
-      "--chunks-per-source <n>",
-      "Chunks per source (1-5, requires --query).",
-      (raw: string) => parseNumberArg(raw, { integer: true }),
-    )
-    .addOption(
-      new Option("--extract-depth <depth>", "Extraction depth.").choices(["basic", "advanced"]),
-    )
-    .addOption(new Option("--format <format>", "Output format.").choices(["markdown", "text"]))
+    .option("--chunks-per-source <n>", "Chunks per source (1-5, requires --query).", int);
+  addExtractOptions(extract)
     .option("--include-images", "Include image URLs.")
-    .option("--timeout <seconds>", "Max wait time in seconds (1-60).", (raw: string) =>
-      parseNumberArg(raw),
-    )
+    .option("--timeout <seconds>", "Max wait time in seconds (1-60).", seconds)
     .addHelpText("after", KEYLESS_HELP)
     .action(async (urls: string[], opts: Record<string, unknown>, cmd: Command) => {
       await (await import("./commands/extract.js")).run(urls, opts, cmd);
     });
-  addOutputOption(extract);
-  addClientNameOption(extract);
-  const int = (raw: string) => parseNumberArg(raw, { integer: true });
-  const seconds = (raw: string) => parseNumberArg(raw);
+  addCommonOptions(extract);
   const addSiteOptions = (cmd: Command, verb: string, limitHelp: string) => {
     cmd
       .option("--max-depth <n>", `Levels deep to ${verb} (1-5, default: 1).`, int)
@@ -166,11 +165,7 @@ export function buildProgram(): Command {
     .argument("<url>", "Where to start; returns full content for each discovered page.");
   addSiteOptions(crawl, "crawl", "Total pages cap (default: 50).");
   crawl.option("--chunks-per-source <n>", "Chunks per page (1-5, requires --instructions).", int);
-  crawl
-    .addOption(
-      new Option("--extract-depth <depth>", "Extraction depth.").choices(["basic", "advanced"]),
-    )
-    .addOption(new Option("--format <format>", "Output format.").choices(["markdown", "text"]));
+  addExtractOptions(crawl);
   addSiteFilters(crawl);
   crawl
     .option("--include-images", "Include images.")
@@ -179,8 +174,7 @@ export function buildProgram(): Command {
     .action(async (url: string, opts: Record<string, unknown>, cmd: Command) => {
       await (await import("./commands/site.js")).runCrawl(url, opts, cmd);
     });
-  addOutputOption(crawl);
-  addClientNameOption(crawl);
+  addCommonOptions(crawl);
 
   const map = program
     .command("map")
@@ -193,8 +187,7 @@ export function buildProgram(): Command {
     .action(async (url: string, opts: Record<string, unknown>, cmd: Command) => {
       await (await import("./commands/site.js")).runMap(url, opts, cmd);
     });
-  addOutputOption(map);
-  addClientNameOption(map);
+  addCommonOptions(map);
 
   const group = program
     .command("research")
@@ -256,8 +249,7 @@ export function buildProgram(): Command {
       await (await research()).poll(requestId, opts, cmd);
     });
   addWaitOptions(researchPoll);
-  addOutputOption(researchPoll);
-  addClientNameOption(researchPoll);
+  addCommonOptions(researchPoll);
 
   program
     .command("update")

@@ -12,12 +12,12 @@ import { isDeepStrictEqual } from "node:util";
 
 export const SKILLS_REPO = "tavily-ai/skills";
 // Exact version: npx runs whatever this resolves to with the user's permissions.
-export const NPX_SKILLS_PACKAGE = "skills@1.7.4";
-export const NPX_TIMEOUT_MS = 300_000;
+const NPX_SKILLS_PACKAGE = "skills@1.7.4";
+const NPX_TIMEOUT_MS = 300_000;
 
 export type AgentName = "claude-code" | "codex" | "cursor";
 
-export interface AgentSpec {
+interface AgentSpec {
   marker: string;
   skillsDir: string;
 }
@@ -27,7 +27,7 @@ export interface SkillsInstallResult {
   restartRequired: boolean;
 }
 
-export interface SkillsOptions {
+interface SkillsOptions {
   home?: string;
   env?: NodeJS.ProcessEnv;
 }
@@ -41,7 +41,7 @@ export interface SkillsDeps extends SkillsOptions {
 }
 
 /** Return supported agent locations rooted at the current user's home. */
-export function agentSpecs(opts: SkillsOptions = {}): Record<AgentName, AgentSpec> {
+function agentSpecs(opts: SkillsOptions = {}): Record<AgentName, AgentSpec> {
   const root = opts.home ?? homedir();
   const env = opts.env ?? process.env;
   const claudeRoot = env.CLAUDE_CONFIG_DIR || path.join(root, ".claude");
@@ -168,7 +168,7 @@ export async function installAgentSkills(
 }
 
 /** Digest every directory directly under each skills dir, keyed by path so a new agent link counts. */
-export function snapshotSkills(skillDirs: string[]): Map<string, string> {
+function snapshotSkills(skillDirs: string[]): Map<string, string> {
   const snapshot = new Map<string, string>();
   for (const skillDir of skillDirs) {
     if (!isDir(skillDir)) continue;
@@ -191,7 +191,7 @@ function regularFiles(dir: string, prefix = ""): string[] {
 }
 
 /** SHA-256 over sorted regular files: path length, path, content length, content. */
-export function directoryDigest(dir: string): string {
+function directoryDigest(dir: string): string {
   const digest = createHash("sha256");
   const sorted = regularFiles(dir)
     .map((rel) => ({ rel, bytes: Buffer.from(rel, "utf8") }))

@@ -186,7 +186,7 @@ export async function runLogout(
     authenticated: key !== null,
     method,
     source,
-    local_credentials_cleared: result.localCredentialsCleared,
+    local_credentials_cleared: true,
     environment_credential_present: envPresent,
   };
   if (envPresent) payload.warning = ENV_CREDENTIAL_WARNING;

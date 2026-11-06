@@ -5,7 +5,7 @@ import path from "node:path";
 import { compareVersions } from "../util/semver.js";
 import { whichOnPath } from "./skills.js";
 
-export const NPM_LATEST_URL = "https://registry.npmjs.org/@tavily/cli/latest";
+const NPM_LATEST_URL = "https://registry.npmjs.org/@tavily/cli/latest";
 const PACKAGE_SPEC = "@tavily/cli@latest";
 
 export type InstallMethod = "npm" | "pnpm" | "yarn" | "bun" | "npx" | "source" | "unknown";

@@ -9,7 +9,7 @@ import { colorEnabled, colors, LOGO } from "./ui/theme.js";
 import { splitShellWords } from "./util/shell-words.js";
 import { VERSION } from "./version.js";
 
-export interface ReplOptions {
+interface ReplOptions {
   input?: NodeJS.ReadableStream & { isTTY?: boolean; setRawMode?: (mode: boolean) => unknown };
   output?: NodeJS.WritableStream & { columns?: number };
   program?: () => Command;

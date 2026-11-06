@@ -5,7 +5,7 @@ import { parseNumberArg } from "../commands/options.js";
 
 type SearchKey = keyof typeof searchParameters;
 
-export const SEARCH_FLAG_OVERRIDES: Partial<
+const SEARCH_FLAG_OVERRIDES: Partial<
   Record<SearchKey, { flag?: string; positional?: true; bareValue?: string }>
 > = {
   query: { positional: true },
@@ -14,7 +14,7 @@ export const SEARCH_FLAG_OVERRIDES: Partial<
   includeRawContent: { bareValue: "markdown" },
 };
 
-export type SearchFlagSpec = {
+type SearchFlagSpec = {
   key: SearchKey;
   apiName: string;
   flags: string;

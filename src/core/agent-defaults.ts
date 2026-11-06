@@ -5,8 +5,8 @@ import { dirname, join, resolve } from "node:path";
 import { InvalidArgumentError } from "commander";
 import { isObject } from "../errors.js";
 
-export const CLAUDE_DENIED_TOOLS = ["WebSearch", "WebFetch"];
-export const CODEX_WEB_SEARCH_LINE = 'web_search = "disabled"';
+const CLAUDE_DENIED_TOOLS = ["WebSearch", "WebFetch"];
+const CODEX_WEB_SEARCH_LINE = 'web_search = "disabled"';
 
 const TOML_TABLE_HEADER = /^\s*\[/;
 const TOML_WEB_SEARCH = /^\s*web_search\s*=/;

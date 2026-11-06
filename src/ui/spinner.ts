@@ -3,7 +3,7 @@ import { isTerminal } from "./text.js";
 const FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 const INTERVAL_MS = 80;
 
-export interface SpinnerOptions {
+interface SpinnerOptions {
   enabled: boolean;
   stream?: NodeJS.WriteStream;
 }

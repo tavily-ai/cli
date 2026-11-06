@@ -13,7 +13,7 @@ export interface TavilyClientLike {
   getResearch(requestId: string): Promise<Json>;
 }
 
-export interface TavilyClientOptions {
+interface TavilyClientOptions {
   apiKey?: string | undefined;
   sessionId: string;
   humanId?: string;

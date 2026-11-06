@@ -7,10 +7,10 @@ import { isObject, messageOf } from "../errors.js";
 import { sseDataLines } from "./sse.js";
 import type { Json, TavilyClientLike } from "./tavily-client.js";
 
-export const MCP_URL = "https://mcp.tavily.com/mcp";
+const MCP_URL = "https://mcp.tavily.com/mcp";
 const TIMEOUT_MS = 180_000;
 
-export interface McpClientOptions {
+interface McpClientOptions {
   token: string;
   sessionId: string;
   humanId?: string;

@@ -130,9 +130,13 @@ test("stored oauth revokes refresh before access", async () => {
 
 test("stored oauth without tokens is not revoked; incomplete client raises", async () => {
   const server = fakeServer();
-  expect(await revokeStoredOauth({ client_id: "cid" }, { fetchImpl: server.fetchImpl })).toBe(
-    false,
-  );
+  // Empty tokens are never sent for revocation.
+  expect(
+    await revokeStoredOauth(
+      { client_id: "cid", access_token: "", refresh_token: "" },
+      { fetchImpl: server.fetchImpl },
+    ),
+  ).toBe(false);
   await expect(
     revokeStoredOauth({ access_token: "a" }, { fetchImpl: server.fetchImpl }),
   ).rejects.toThrow(
@@ -165,7 +169,6 @@ test("clear credentials reports revocation failure but clears disk", async () =>
 
   const result = await clearCredentials({ ...opts, fetchImpl: server.fetchImpl });
 
-  expect(result.localCredentialsCleared).toBe(true);
   expect(result.serverRevoked).toBe(false);
   expect(result.revocationError).toBe(
     "refresh_token: Token revocation failed (HTTP 500).; access_token: Token revocation failed (HTTP 500).",
@@ -178,11 +181,11 @@ test("clear credentials revokes, deletes an emptied config, and reports success"
   await writeConfig({ api_key: "tvly-x", oauth: previousOauth });
   const server = fakeServer({ revoke: ok });
   const result = await clearCredentials({ ...opts, fetchImpl: server.fetchImpl });
-  expect(result).toEqual({ localCredentialsCleared: true, serverRevoked: true });
+  expect(result).toEqual({ serverRevoked: true });
   expect(readdirSync(configPaths(home).dir)).not.toContain("config.json");
 
   const again = await clearCredentials({ ...opts, fetchImpl: server.fetchImpl });
-  expect(again).toEqual({ localCredentialsCleared: true, serverRevoked: null });
+  expect(again).toEqual({ serverRevoked: null });
 });
 
 test("save api key still saves when revoking the previous oauth fails", async () => {

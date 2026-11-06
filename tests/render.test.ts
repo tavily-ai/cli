@@ -2,14 +2,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import {
-  echoPages,
-  emit,
-  footer,
-  printExtractResults,
-  printMultiSearchResults,
-  printSearchResults,
-} from "../src/ui/render.js";
+import { echoPages, emit, footer } from "../src/ui/render/emit.js";
+import { printExtractResults } from "../src/ui/render/extract.js";
+import { printMultiSearchResults, printSearchResults } from "../src/ui/render/search.js";
 import { setTerminalOverride } from "../src/ui/text.js";
 import { captureOutput, visible } from "./helpers/capture.js";
 

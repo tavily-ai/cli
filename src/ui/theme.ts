@@ -1,10 +1,10 @@
 import pc from "picocolors";
 
-export const AQUA = "#5CD9E6";
-export const PINK = "#FAA2FB";
-export const YELLOW = "#FFC769";
-export const PURPLE = "#8385F9";
-export const GREEN = "#9BC0AE";
+const AQUA = "#5CD9E6";
+const PINK = "#FAA2FB";
+const YELLOW = "#FFC769";
+const PURPLE = "#8385F9";
+const GREEN = "#9BC0AE";
 
 /**
  * Color only for a terminal: NO_COLOR and FORCE_COLOR=0 turn it off, any other non-empty

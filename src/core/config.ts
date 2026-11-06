@@ -31,7 +31,6 @@ export interface ConfigOptions {
 }
 
 export interface ClearCredentialsResult {
-  localCredentialsCleared: true;
   serverRevoked: boolean | null;
   revocationError?: string;
 }
@@ -41,7 +40,6 @@ export function configPaths(home?: string) {
   return {
     dir,
     file: path.join(dir, "config.json"),
-    sessionFile: path.join(dir, "session.json"),
     mcpAuthDir: path.join(home ?? homedir(), ".mcp-auth"),
   };
 }
@@ -236,7 +234,7 @@ export function getApiBaseUrl(opts: ConfigOptions = {}): string | null {
 
 export async function clearCredentials(opts: ConfigOptions = {}): Promise<ClearCredentialsResult> {
   const result = await withConfigLock(async (config) => {
-    const outcome: ClearCredentialsResult = { localCredentialsCleared: true, serverRevoked: null };
+    const outcome: ClearCredentialsResult = { serverRevoked: null };
     if (isObject(config.oauth)) {
       try {
         if (await revokeStoredOauth(config.oauth, opts)) outcome.serverRevoked = true;

@@ -25,6 +25,11 @@ export function addOutputOption(cmd: Command): Command {
   );
 }
 
+/** `-o, --output` then `--client-name`, the pair every API command takes. */
+export function addCommonOptions(cmd: Command): Command {
+  return addClientNameOption(addOutputOption(cmd));
+}
+
 /** Parse a numeric option value; bounds errors name the `minimum <n>` / `maximum <n>` they break. */
 export function parseNumberArg(
   raw: string,

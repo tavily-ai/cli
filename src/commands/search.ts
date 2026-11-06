@@ -5,10 +5,10 @@ import { getClientOrKeyless } from "../core/client-factory.js";
 import { applySearchFlags, searchBodyFromOptions } from "../core/search-flags.js";
 import type { Json } from "../core/tavily-client.js";
 import { ExitError, messageOf } from "../errors.js";
-import { resolveOutput } from "../ui/output-file.js";
-import { printMultiSearchResults, printSearchResults } from "../ui/render.js";
+import { resolveOutput } from "../ui/render/emit.js";
+import { printMultiSearchResults, printSearchResults } from "../ui/render/search.js";
 import { withSpinner } from "../ui/spinner.js";
-import { addClientNameOption, addOutputOption, parseNumberArg, resolveJson } from "./options.js";
+import { addCommonOptions, parseNumberArg, resolveJson } from "./options.js";
 import {
   keylessCapError,
   LIMIT_STATUSES,
@@ -36,8 +36,7 @@ export function configure(cmd: Command): void {
       "Characters of each result's content to print (default 600, shared across queries: 300 each for 2, 200 for 3); 0 prints it whole. --json and -o files keep it whole.",
     ).argParser((raw: string) => parseNumberArg(raw, { integer: true, minimum: 0 })),
   );
-  addOutputOption(cmd);
-  addClientNameOption(cmd);
+  addCommonOptions(cmd);
 }
 
 function readQueries(args: string[], cmd: Command): string[] {

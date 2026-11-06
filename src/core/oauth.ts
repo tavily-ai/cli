@@ -9,13 +9,13 @@ import type { AddressInfo } from "node:net";
 import { isObject, messageOf, OAuthError } from "../errors.js";
 
 export const MCP_ISSUER = "https://mcp.tavily.com/";
-export const MCP_RESOURCE = "https://mcp.tavily.com/mcp";
-export const OAUTH_METADATA_URL = "https://mcp.tavily.com/.well-known/oauth-authorization-server";
-export const PRM_URL = "https://mcp.tavily.com/.well-known/oauth-protected-resource/mcp";
-export const DEFAULT_SCOPES = "openid offline_access";
-export const CLIENT_NAME = "Tavily CLI";
-export const LOGIN_TIMEOUT_SECONDS = 180;
-export const HTTP_TIMEOUT_MS = 30_000;
+const MCP_RESOURCE = "https://mcp.tavily.com/mcp";
+const OAUTH_METADATA_URL = "https://mcp.tavily.com/.well-known/oauth-authorization-server";
+const PRM_URL = "https://mcp.tavily.com/.well-known/oauth-protected-resource/mcp";
+const DEFAULT_SCOPES = "openid offline_access";
+const CLIENT_NAME = "Tavily CLI";
+const LOGIN_TIMEOUT_SECONDS = 180;
+const HTTP_TIMEOUT_MS = 30_000;
 const EXPIRY_SKEW_SECONDS = 60;
 
 const FALLBACK_METADATA: Record<string, string> = {
@@ -198,14 +198,11 @@ async function jsonObjectResponse(
   return data;
 }
 
-export function httpErrorMessage(prefix: string, status: number, text: string): string {
-  let detail = text.trim().replaceAll("\n", " ");
-  if (detail.length > 280) detail = `${detail.slice(0, 277)}...`;
-  return detail ? `${prefix} (HTTP ${status}): ${detail}` : `${prefix} (HTTP ${status}).`;
-}
-
 async function httpError(prefix: string, resp: Response): Promise<OAuthError> {
-  return new OAuthError(httpErrorMessage(prefix, resp.status, await transport(() => resp.text())));
+  let detail = (await transport(() => resp.text())).trim().replaceAll("\n", " ");
+  if (detail.length > 280) detail = `${detail.slice(0, 277)}...`;
+  const status = `${prefix} (HTTP ${resp.status})`;
+  return new OAuthError(detail ? `${status}: ${detail}` : `${status}.`);
 }
 
 export async function registerClient(
@@ -362,7 +359,6 @@ export async function revokeToken(
   { tokenTypeHint }: { tokenTypeHint: "access_token" | "refresh_token" },
   fetchImpl: typeof fetch = globalThis.fetch,
 ): Promise<void> {
-  if (!token) return;
   if (!metadata.revocationEndpoint) {
     throw new OAuthError("OAuth server does not advertise a token revocation endpoint.");
   }

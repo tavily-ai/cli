@@ -1,8 +1,8 @@
 /** tvly extract — extract content from URLs via the Tavily API. */
 import type { Command } from "commander";
 import { getClientOrKeyless } from "../core/client-factory.js";
-import { resolveOutput } from "../ui/output-file.js";
-import { printExtractResults } from "../ui/render.js";
+import { resolveOutput } from "../ui/render/emit.js";
+import { printExtractResults } from "../ui/render/extract.js";
 import { withSpinner } from "../ui/spinner.js";
 import { domainOf } from "../ui/text.js";
 import { resolveJson } from "./options.js";

@@ -1,8 +1,8 @@
 /** tvly crawl and tvly map — walk a website via the Tavily API (both need an API key). */
 import type { Command } from "commander";
 import { getKeyedClient } from "../core/client-factory.js";
-import { resolveOutput } from "../ui/output-file.js";
-import { printCrawlResults, printMapResults } from "../ui/render.js";
+import { printCrawlResults, printMapResults } from "../ui/render/crawl.js";
+import { resolveOutput } from "../ui/render/emit.js";
 import { withSpinner } from "../ui/spinner.js";
 import { hostOf } from "../ui/text.js";
 import { resolveJson } from "./options.js";
