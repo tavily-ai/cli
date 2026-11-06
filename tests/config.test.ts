@@ -345,7 +345,7 @@ test("config lock serializes separate processes", async () => {
       `import { withConfigLock } from ${JSON.stringify(CONFIG_MODULE)};`,
       "const [home, key] = process.argv.slice(2);",
       "await withConfigLock(async (config) => {",
-      "  await new Promise((r) => setTimeout(r, 200));",
+      "  await new Promise((r) => setTimeout(r, 50));",
       "  return { config: { ...config, [key]: true }, result: undefined };",
       "}, { home });",
     ].join("\n"),

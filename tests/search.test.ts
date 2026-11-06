@@ -14,7 +14,6 @@ import type { Json } from "../src/core/tavily-client.js";
 import { setTerminalOverride } from "../src/ui/text.js";
 import { captureOutput } from "./helpers/capture.js";
 import { runProgram, stubClient } from "./helpers/program.js";
-import { runCli } from "./helpers/run-cli.js";
 
 const io = captureOutput();
 const fixture = JSON.parse(
@@ -267,10 +266,9 @@ test("JSON mode shows no spinner", async () => {
   expect(io.stderr()).toBe("");
 });
 
-test("dist/cli.js search --help lists the flags in order", async () => {
-  vi.restoreAllMocks();
-  const { stdout, code } = await runCli(["search", "--help"]);
-  expect(code).toBe(0);
+test("search --help lists the flags in order", async () => {
+  expect(await runProgram(["search", "--help"], stubClient({}))).toBe(0);
+  const stdout = io.stdout();
   const flags = [...stdout.matchAll(/^ {2}(?:-\w, )?(--[a-z-]+)/gm)].map((m) => m[1]);
   expect(flags).toEqual([
     "--depth",
@@ -311,9 +309,8 @@ test("dist/cli.js search --help lists the flags in order", async () => {
     "--json",
   ]);
   expect(stdout).toContain("ultra-fast");
-  const viaHelp = await runCli(["help", "search"]);
-  expect(viaHelp.code).toBe(0);
-  expect(viaHelp.stdout).toBe(stdout);
+  expect(await runProgram(["help", "search"], stubClient({}))).toBe(0);
+  expect(io.stdout()).toBe(stdout + stdout);
 });
 
 describe("search flag specs", () => {

@@ -34,22 +34,22 @@ describe("detectInstall", () => {
       ["/usr/bin/npm", "install", "-g", "@tavily/cli@latest"],
     ],
     [
-      "/home/u/.local/share/pnpm/global/5/node_modules/@tavily/cli/dist/cli.js",
+      "/opt/u/.local/share/pnpm/global/5/node_modules/@tavily/cli/dist/cli.js",
       "pnpm",
       ["/usr/bin/pnpm", "add", "-g", "@tavily/cli@latest"],
     ],
     [
-      "/home/u/.config/yarn/global/node_modules/@tavily/cli/dist/cli.js",
+      "/opt/u/.config/yarn/global/node_modules/@tavily/cli/dist/cli.js",
       "yarn",
       ["/usr/bin/yarn", "global", "add", "@tavily/cli@latest"],
     ],
     [
-      "/home/u/.yarn/global/node_modules/@tavily/cli/dist/cli.js",
+      "/opt/u/.yarn/global/node_modules/@tavily/cli/dist/cli.js",
       "yarn",
       ["/usr/bin/yarn", "global", "add", "@tavily/cli@latest"],
     ],
     [
-      "/home/u/.bun/install/global/node_modules/@tavily/cli/dist/cli.js",
+      "/opt/u/.bun/install/global/node_modules/@tavily/cli/dist/cli.js",
       "bun",
       ["/usr/bin/bun", "add", "-g", "@tavily/cli@latest"],
     ],
@@ -102,7 +102,7 @@ describe("detectInstall", () => {
   });
 
   test("npx cache is blocked", () => {
-    const info = detect("/home/u/.npm/_npx/abc123/node_modules/@tavily/cli/dist/cli.js");
+    const info = detect("/opt/u/.npm/_npx/abc123/node_modules/@tavily/cli/dist/cli.js");
     expect(info.method).toBe("npx");
     expect(info.command).toBeNull();
     expect(info.blockedReason).toContain("npx @tavily/cli@latest");
