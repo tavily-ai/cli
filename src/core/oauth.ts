@@ -18,8 +18,7 @@ const LOGIN_TIMEOUT_SECONDS = 180;
 const HTTP_TIMEOUT_MS = 30_000;
 const EXPIRY_SKEW_SECONDS = 60;
 
-const FALLBACK_METADATA: Record<string, string> = {
-  issuer: MCP_ISSUER,
+const FALLBACK_METADATA = {
   authorization_endpoint: "https://mcp.tavily.com/authorize",
   token_endpoint: "https://mcp.tavily.com/token",
   registration_endpoint: "https://mcp.tavily.com/register",
@@ -121,7 +120,7 @@ async function transport<T>(fn: () => Promise<T>): Promise<T> {
 export async function fetchMetadata(
   fetchImpl: typeof fetch = globalThis.fetch,
 ): Promise<OAuthMetadata> {
-  const data: Record<string, string> = { ...FALLBACK_METADATA };
+  const data = { ...FALLBACK_METADATA };
 
   // Discovery failures (network, non-2xx, bad JSON) fall back to the static endpoints;
   // OAuthError (untrusted metadata) always propagates.
@@ -140,12 +139,7 @@ export async function fetchMetadata(
     if (discovered.issuer !== MCP_ISSUER) {
       throw new OAuthError("OAuth discovery issuer does not match the configured Tavily issuer.");
     }
-    for (const field of [
-      "authorization_endpoint",
-      "token_endpoint",
-      "registration_endpoint",
-      "revocation_endpoint",
-    ]) {
+    for (const field of Object.keys(data) as (keyof typeof data)[]) {
       const value = discovered[field];
       if (typeof value === "string") data[field] = validatedHttpsUrl(value, field);
     }
@@ -163,18 +157,12 @@ export async function fetchMetadata(
     resource = discoveredResource;
   }
 
-  const { registration_endpoint: registration, authorization_endpoint: authorization } = data;
-  const { token_endpoint: token, revocation_endpoint: revocation } = data;
-  if (!registration || !authorization || !token) {
-    throw new OAuthError(
-      "OAuth discovery did not return authorization, token, and registration endpoints.",
-    );
-  }
+  // Every endpoint is a fallback constant or was validated above.
   return {
-    authorizationEndpoint: validatedHttpsUrl(authorization, "authorization_endpoint"),
-    tokenEndpoint: validatedHttpsUrl(token, "token_endpoint"),
-    registrationEndpoint: validatedHttpsUrl(registration, "registration_endpoint"),
-    revocationEndpoint: revocation ? validatedHttpsUrl(revocation, "revocation_endpoint") : null,
+    authorizationEndpoint: data.authorization_endpoint,
+    tokenEndpoint: data.token_endpoint,
+    registrationEndpoint: data.registration_endpoint,
+    revocationEndpoint: data.revocation_endpoint,
     resource,
   };
 }

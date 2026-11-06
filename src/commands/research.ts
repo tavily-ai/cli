@@ -79,7 +79,7 @@ async function waitForResult(
   }
   let elapsed = 0;
   const message = () => colors.aqua(`${opts.label}... ${elapsed}s elapsed`);
-  const live = spinner(message(), { enabled: true });
+  const live = spinner(message(), true);
   try {
     let nextPoll = 0;
     while (elapsed < opts.timeout) {
@@ -188,7 +188,7 @@ export async function run(
   }
 
   const result = await runWithApiErrors(json, () =>
-    withSpinner("Starting research...", { enabled: !json }, () => client.research(body)),
+    withSpinner("Starting research...", !json, () => client.research(body)),
   );
   // A synchronous result (the MCP endpoint returns one) needs no polling.
   if (isDone(result) || result.content) {

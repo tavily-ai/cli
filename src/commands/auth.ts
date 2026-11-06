@@ -72,8 +72,7 @@ export async function runLogin(
     }
   };
 
-  const waiting = () =>
-    spinner(colors.aqua("Waiting for browser authorization..."), { enabled: !json });
+  const waiting = () => spinner(colors.aqua("Waiting for browser authorization..."), !json);
   let spin = waiting();
   const onStatus = (url: string) => {
     // Clear the spinner line so the URL block prints cleanly, then resume waiting.

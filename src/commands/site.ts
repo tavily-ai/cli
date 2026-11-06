@@ -62,7 +62,7 @@ export async function runCrawl(url: string, opts: CrawlOptions, cmd: Command): P
     ...definedSnake(opts, ["chunksPerSource", "extractDepth", "format", "includeImages"]),
   };
   const response = await runWithApiErrors(json, () =>
-    withSpinner(`Crawling ${url}...`, { enabled: !json }, () => client.crawl(body)),
+    withSpinner(`Crawling ${url}...`, !json, () => client.crawl(body)),
   );
   await printCrawlResults(response, { json, outputFile, outputDir: opts.outputDir });
 }
@@ -72,7 +72,7 @@ export async function runMap(url: string, opts: SiteOptions, cmd: Command): Prom
   const outputFile = resolveOutput(opts.output, "map", hostOf(url));
   const client = await getKeyedClient("map", { json, clientName: opts.clientName });
   const response = await runWithApiErrors(json, () =>
-    withSpinner(`Mapping ${url}...`, { enabled: !json }, () => client.map(siteBody(url, opts))),
+    withSpinner(`Mapping ${url}...`, !json, () => client.map(siteBody(url, opts))),
   );
   await printMapResults(response, { json, outputFile });
 }

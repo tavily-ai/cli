@@ -2,7 +2,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { plain, terminalWidth } from "../text.js";
+import { plain } from "../text.js";
 import { colors, err, out } from "../theme.js";
 
 export type Json = Record<string, unknown>;
@@ -51,7 +51,7 @@ export function footer(count: number, unit: string, responseTime?: unknown): voi
   const parts = [`${count} ${unit}`];
   if (typeof responseTime === "number" && responseTime) parts.push(`${responseTime.toFixed(2)}s`);
   const label = ` ${parts.join(" | ")} `;
-  const fill = Math.max(0, terminalWidth(process.stdout) - label.length);
+  const fill = Math.max(0, (process.stdout.columns ?? 80) - label.length);
   const left = Math.floor(fill / 2);
   out();
   out(colors.dim(`${"─".repeat(left)}${label}${"─".repeat(fill - left)}`));

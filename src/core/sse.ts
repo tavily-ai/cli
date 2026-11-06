@@ -16,7 +16,8 @@ export async function* sseDataLines(chunks: AsyncIterable<Buffer | string>): Asy
   if (payload !== undefined) yield payload;
 }
 
-function dataPayload(rawLine: string): string | undefined {
+/** The payload of one SSE `data:` line, or undefined for any other line. */
+export function dataPayload(rawLine: string): string | undefined {
   const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
   if (!line.startsWith("data:")) return undefined;
   const rest = line.slice(5);

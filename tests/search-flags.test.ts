@@ -23,7 +23,7 @@ test("every catalog key except query produces exactly one spec", () => {
 test("searchDepth is --depth with the catalog choices", () => {
   const s = spec("searchDepth");
   expect(s.flags).toBe("--depth <value>");
-  expect(s.apiName).toBe("search_depth");
+  expect(searchBodyFromOptions({ searchDepth: "basic" })).toEqual({ search_depth: "basic" });
   expect(s.choices).toEqual(["basic", "advanced", "fast", "ultra-fast"]);
 });
 

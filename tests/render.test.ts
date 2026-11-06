@@ -192,3 +192,17 @@ test("footer centres the count and response time in a dim rule", () => {
   expect(text.startsWith("\n─")).toBe(true);
   expect(text).toContain(" 3 results | 1.23s ");
 });
+
+test("footer spans the terminal width, 80 columns when unknown", () => {
+  const columns = process.stdout.columns;
+  try {
+    process.stdout.columns = undefined as unknown as number;
+    footer(1, "URLs");
+    process.stdout.columns = 120;
+    footer(1, "URLs");
+  } finally {
+    process.stdout.columns = columns;
+  }
+  const rules = visible(io.stdout()).split("\n").filter(Boolean);
+  expect(rules.map((r) => r.length)).toEqual([80, 120]);
+});

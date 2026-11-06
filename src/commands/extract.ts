@@ -41,7 +41,7 @@ export async function run(urls: string[], opts: ExtractOptions, cmd: Command): P
   const response = await runWithApiErrors(json, async () => {
     const client = await getClientOrKeyless(opts.clientName);
     const label = `Extracting ${urls.length} URL${urls.length > 1 ? "s" : ""}...`;
-    return withSpinner(label, { enabled: !json }, () => client.extract(body));
+    return withSpinner(label, !json, () => client.extract(body));
   });
   await printExtractResults(response, { json, outputFile });
 }

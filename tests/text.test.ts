@@ -8,12 +8,10 @@ import {
   setTerminalOverride,
   snippet,
   table,
-  terminalWidth,
   tree,
 } from "../src/ui/text.js";
 
-const fakeStream = (isTTY: boolean, columns?: number) =>
-  ({ isTTY, columns }) as unknown as NodeJS.WriteStream;
+const fakeStream = (isTTY: boolean) => ({ isTTY }) as unknown as NodeJS.WriteStream;
 
 afterEach(() => {
   setTerminalOverride(null);
@@ -101,11 +99,6 @@ test("table pads columns and draws a rule", () => {
       ],
     ),
   ).toBe(["Name  N ", "───── ──", "alpha 1 ", "b     22"].join("\n"));
-});
-
-test("terminalWidth defaults to 80", () => {
-  expect(terminalWidth(fakeStream(true, 120))).toBe(120);
-  expect(terminalWidth(fakeStream(false))).toBe(80);
 });
 
 test("renderMarkdown renders headings bold and keeps link URLs", async () => {

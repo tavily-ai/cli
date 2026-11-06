@@ -50,12 +50,13 @@ export async function run(args: string[], opts: SearchOptions, cmd: Command): Pr
   // One search's worth of text per command, however many queries it holds.
   const maxChars = opts.maxChars ?? Math.floor(DEFAULT_CHARS / queries.length);
   const body = searchBodyFromOptions(opts);
-  const spin = { enabled: !json };
 
   if (queries.length === 1) {
     const response = await runWithApiErrors(json, async () => {
       const client = await getClientOrKeyless(opts.clientName);
-      return withSpinner("Searching...", spin, () => client.search({ query: queries[0], ...body }));
+      return withSpinner("Searching...", !json, () =>
+        client.search({ query: queries[0], ...body }),
+      );
     });
     await printSearchResults(response, { json, outputFile, maxChars });
     return;
@@ -64,7 +65,7 @@ export async function run(args: string[], opts: SearchOptions, cmd: Command): Pr
   const client = await runWithApiErrors(json, () => getClientOrKeyless(opts.clientName));
   const capHits: TavilyKeylessLimitError[] = [];
   let limitHit = false;
-  const responses = await withSpinner("Searching...", spin, () =>
+  const responses = await withSpinner("Searching...", !json, () =>
     Promise.all(
       queries.map(async (query): Promise<Json> => {
         try {

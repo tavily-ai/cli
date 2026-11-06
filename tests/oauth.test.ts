@@ -191,6 +191,8 @@ describe("fetchMetadata", () => {
   test.each([
     ["issuer", "https://attacker.example/", "issuer does not match"],
     ["token_endpoint", "http://mcp.tavily.com/token", "invalid token_endpoint"],
+    // An empty endpoint is rejected rather than replaced by the fallback.
+    ["authorization_endpoint", "", "invalid authorization_endpoint"],
     [
       "registration_endpoint",
       "https://user:pass@mcp.tavily.com/register",
