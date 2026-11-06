@@ -8,15 +8,12 @@ import { ExitError } from "../errors.js";
 import { resolveOutput } from "../ui/output-file.js";
 import { printMultiSearchResults, printSearchResults } from "../ui/render.js";
 import { withSpinner } from "../ui/spinner.js";
+import { addClientNameOption, addOutputOption, parseNumberArg, resolveJson } from "./options.js";
 import {
-  addClientNameOption,
-  addOutputOption,
   keylessCapError,
   LIMIT_STATUSES,
-  parseNumberArg,
   printKeylessCapHit,
   readQueryArg,
-  resolveJson,
   runWithApiErrors,
 } from "./shared.js";
 

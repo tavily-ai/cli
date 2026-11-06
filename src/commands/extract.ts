@@ -6,7 +6,8 @@ import { resolveOutput } from "../ui/output-file.js";
 import { printExtractResults } from "../ui/render.js";
 import { withSpinner } from "../ui/spinner.js";
 import { domainOf } from "../ui/text.js";
-import { resolveJson, runWithApiErrors } from "./shared.js";
+import { resolveJson } from "./options.js";
+import { runWithApiErrors } from "./shared.js";
 
 const MAX_URLS = 20;
 

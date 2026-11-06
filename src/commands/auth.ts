@@ -16,7 +16,8 @@ import { ExitError, OAuthError } from "../errors.js";
 import { spinner } from "../ui/spinner.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, LOGO, out } from "../ui/theme.js";
-import { getApiKeyOrExit, resolveJson } from "./shared.js";
+import { getApiKeyOrExit } from "./common.js";
+import { resolveJson } from "./options.js";
 
 export interface AuthDeps extends ConfigOptions {
   login?: typeof runBrowserLogin;

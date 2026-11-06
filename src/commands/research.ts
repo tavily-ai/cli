@@ -8,7 +8,8 @@ import { emit, printResearchResult } from "../ui/render.js";
 import { spinner, withSpinner } from "../ui/spinner.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
-import { readQueryArg, resolveJson, runWithApiErrors } from "./shared.js";
+import { resolveJson } from "./options.js";
+import { readQueryArg, runWithApiErrors } from "./shared.js";
 
 export interface PollOptions {
   pollInterval: number;

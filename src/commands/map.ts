@@ -5,7 +5,8 @@ import { resolveOutput } from "../ui/output-file.js";
 import { printMapResults } from "../ui/render.js";
 import { withSpinner } from "../ui/spinner.js";
 import { hostOf } from "../ui/text.js";
-import { resolveJson, runWithApiErrors, type SiteOptions, siteBody } from "./shared.js";
+import { resolveJson } from "./options.js";
+import { runWithApiErrors, type SiteOptions, siteBody } from "./shared.js";
 
 interface MapOptions extends SiteOptions {
   output?: string;

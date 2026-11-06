@@ -1,4 +1,4 @@
-import { getApiKeyOrExit } from "../commands/shared.js";
+import { getApiKeyOrExit } from "../commands/common.js";
 import { ExitError } from "../errors.js";
 import { safeLink } from "../ui/text.js";
 import { colors, err } from "../ui/theme.js";

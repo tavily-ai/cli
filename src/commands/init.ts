@@ -34,7 +34,7 @@ import { ExitError } from "../errors.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
 import { VERSION } from "../version.js";
-import { resolveJson } from "./shared.js";
+import { resolveJson } from "./options.js";
 
 export interface InitDeps extends ConfigOptions {
   login?: typeof runBrowserLogin;

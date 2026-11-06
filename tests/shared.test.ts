@@ -1,16 +1,14 @@
 import { TavilyKeylessLimitError, TavilyRequestError } from "@tavily/core";
 import { Command } from "commander";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { handleOauthRefreshError } from "../src/commands/common.js";
+import { addClientNameOption, addOutputOption, resolveJson } from "../src/commands/options.js";
 import {
-  addClientNameOption,
-  addOutputOption,
   handleApiError,
   handleKeylessCapHit,
-  handleOauthRefreshError,
   keylessCapError,
   printKeylessCapHit,
   readQueryArg,
-  resolveJson,
   runWithApiErrors,
   splitCsv,
 } from "../src/commands/shared.js";

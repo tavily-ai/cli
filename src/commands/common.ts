@@ -1,0 +1,29 @@
+/** Credential helpers for commands that never call the API, so they stay free of the SDK. */
+import { type ConfigOptions, getApiKey } from "../core/config.js";
+import { ExitError, OAuthError } from "../errors.js";
+import { sanitizeControl } from "../ui/text.js";
+import { colors, err, out } from "../ui/theme.js";
+
+/** Render a stored OAuth refresh failure without treating it as logout. */
+export function handleOauthRefreshError(e: unknown, json: boolean): never {
+  const text = sanitizeControl(e instanceof Error ? e.message : String(e));
+  if (json) {
+    out(JSON.stringify({ error: { code: "oauth_refresh_failed", message: text } }));
+  } else {
+    err(`  ${colors.pink("> OAuth refresh failed:")} ${text}`);
+  }
+  throw new ExitError(3);
+}
+
+/** The stored/env credential, or null; a failed OAuth refresh exits 3. */
+export async function getApiKeyOrExit(
+  json: boolean,
+  opts: ConfigOptions = {},
+): Promise<string | null> {
+  try {
+    return await getApiKey(opts);
+  } catch (e) {
+    if (e instanceof OAuthError) handleOauthRefreshError(e, json);
+    throw e;
+  }
+}

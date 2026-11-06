@@ -8,7 +8,7 @@ import { sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
 import { compareVersions, isNewer } from "../util/semver.js";
 import { VERSION } from "../version.js";
-import { resolveJson } from "./shared.js";
+import { resolveJson } from "./options.js";
 
 export type SpawnFn = (
   command: string,

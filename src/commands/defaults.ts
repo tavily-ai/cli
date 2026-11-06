@@ -11,7 +11,7 @@ import {
   unsetCodexDefault,
 } from "../core/agent-defaults.js";
 import { colors, out } from "../ui/theme.js";
-import { resolveJson } from "./shared.js";
+import { resolveJson } from "./options.js";
 
 type Agent = "claude" | "codex";
 

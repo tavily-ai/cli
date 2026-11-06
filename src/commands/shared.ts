@@ -1,14 +1,12 @@
-/** Helpers shared by every command: API error handling, common options, query/CSV parsing. */
+/** Helpers shared by the API commands: API error handling, query/CSV parsing. */
 import { readFileSync } from "node:fs";
 import { TavilyKeylessLimitError, TavilyRequestError } from "@tavily/core";
 import { InvalidArgumentError } from "commander";
-import { type ConfigOptions, getApiKey } from "../core/config.js";
 import { ExitError, OAuthError } from "../errors.js";
 import { formatKeylessEnvelopeForTerminal } from "../ui/keyless.js";
 import { safeLink, sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
-
-export { addClientNameOption, addOutputOption, parseNumberArg, resolveJson } from "./options.js";
+import { handleOauthRefreshError } from "./common.js";
 
 // Status codes that represent usage/plan limits rather than real errors.
 export const LIMIT_STATUSES: ReadonlySet<number> = new Set([429, 432]);
@@ -50,30 +48,6 @@ export function handleKeylessCapHit(e: TavilyKeylessLimitError, json: boolean): 
   if (json) out(JSON.stringify({ error: keylessCapError(e) }));
   else printKeylessCapHit(e);
   throw new ExitError(3);
-}
-
-/** Render a stored OAuth refresh failure without treating it as logout. */
-export function handleOauthRefreshError(e: unknown, json: boolean): never {
-  const text = sanitizeControl(message(e));
-  if (json) {
-    out(JSON.stringify({ error: { code: "oauth_refresh_failed", message: text } }));
-  } else {
-    err(`  ${colors.pink("> OAuth refresh failed:")} ${text}`);
-  }
-  throw new ExitError(3);
-}
-
-/** The stored/env credential, or null; a failed OAuth refresh exits 3. */
-export async function getApiKeyOrExit(
-  json: boolean,
-  opts: ConfigOptions = {},
-): Promise<string | null> {
-  try {
-    return await getApiKey(opts);
-  } catch (e) {
-    if (e instanceof OAuthError) handleOauthRefreshError(e, json);
-    throw e;
-  }
 }
 
 export function handleApiError(e: unknown, json: boolean): never {
