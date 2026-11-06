@@ -75,7 +75,7 @@ async function connect(
 
 /**
  * Poll until the task completes or fails; undefined on timeout. JSON mode sleeps `pollInterval`
- * seconds between checks; human mode ticks every second with an elapsed-time spinner. The spinner
+ * seconds (at least 1) between checks; human mode ticks every second with an elapsed-time spinner. The spinner
  * stops before any API error propagates to the caller's `runWithApiErrors`.
  */
 async function waitForResult(
@@ -89,7 +89,7 @@ async function waitForResult(
     while (Date.now() < deadline) {
       const response = await client.getResearch(requestId);
       if (isDone(response)) return response;
-      await sleep(opts.pollInterval * 1000);
+      await sleep(Math.max(1, opts.pollInterval) * 1000);
     }
     return undefined;
   }

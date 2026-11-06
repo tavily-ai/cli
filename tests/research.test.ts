@@ -71,7 +71,8 @@ test("research <query> polls until completed and prints the completed payload", 
   expect(research).toHaveBeenCalledWith({ input: "what is x" });
   expect(getResearch).toHaveBeenCalledTimes(2);
   expect(getResearch).toHaveBeenCalledWith("r1");
-  expect(sleep).toHaveBeenCalledWith(0);
+  // --poll-interval 0 is clamped to 1 s between polls.
+  expect(sleep).toHaveBeenCalledWith(1000);
   expect(JSON.parse(io.stdout())).toEqual(COMPLETED);
 });
 
@@ -87,12 +88,12 @@ test("JSON polling sleeps poll_interval seconds between checks (fake timers)", a
   expect(JSON.parse(io.stdout())).toEqual(COMPLETED);
 });
 
-test("JSON polling with --poll-interval 0 still stops at --timeout", async () => {
+test("JSON polling with --poll-interval 0 sleeps at least 1 s and stops at --timeout", async () => {
   vi.useFakeTimers();
   const { client, getResearch } = pendingClient({ status: "pending" });
-  const sleep = vi.fn(async (_ms: number) => {
+  const sleep = vi.fn(async (ms: number) => {
     if (sleep.mock.calls.length > 100) throw new Error("polling never reached the timeout");
-    vi.setSystemTime(Date.now() + 250);
+    vi.setSystemTime(Date.now() + ms);
   });
   const code = await runProgram(
     ["research", "q", "--poll-interval", "0", "--timeout", "1", "--json"],
@@ -101,7 +102,8 @@ test("JSON polling with --poll-interval 0 still stops at --timeout", async () =>
   );
   expect(code).toBe(0);
   expect(io.stdout()).toBe('{"request_id":"r1","status":"timeout"}\n');
-  expect(getResearch).toHaveBeenCalledTimes(4);
+  expect(sleep.mock.calls.every(([ms]) => ms === 1000)).toBe(true);
+  expect(getResearch.mock.calls.length).toBeLessThanOrEqual(2);
 });
 
 test("--no-wait --json prints the request id and status", async () => {
