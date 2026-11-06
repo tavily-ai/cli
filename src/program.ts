@@ -53,9 +53,10 @@ export function buildProgram(): Command {
         }),
     )
     .option("--all", "Install skills for every detected agent.")
-    .option("--yes", "Accept detected agents without prompting.")
+    .option("--yes", "Accept detected agents and the global install without prompting.")
     .option("--skip-auth", "Keep keyless mode when no credential is configured.")
     .option("--skip-skills", "Do not install or update Tavily agent skills.")
+    .option("--skip-install", "Do not install tvly globally.")
     .option("--api-key <key>", "Authenticate with a Tavily API key instead of OAuth.")
     .option("--browser", "Open OAuth in a browser.")
     .option("--no-browser", "Print the OAuth URL and wait for its local callback.")

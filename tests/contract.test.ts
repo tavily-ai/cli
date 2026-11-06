@@ -124,6 +124,16 @@ describe("JSON and plain output match the Python CLI", () => {
         for (const key of INSTALL_SPECIFIC) {
           expect(typeof actual[key]).toBe(typeof expected[key]);
         }
+      } else if (base === "init") {
+        // `install` is new in the TypeScript CLI: it records the global-install step.
+        const { install, ...rest } = actual;
+        expect(install).toEqual({
+          global: false,
+          manager: null,
+          on_path: true,
+          path_updated: false,
+        });
+        expect(rest).toEqual(expected);
       } else {
         expect(actual).toEqual(expected);
       }
