@@ -109,6 +109,34 @@ test("detail.error wins over error and status defaults to 0", async () => {
   expect(err).toMatchObject({ message: "deep", status: 0 });
 });
 
+test("a failed research task is returned, not raised, like the API-key path", async () => {
+  const failed = { request_id: "r1", status: "failed", error: "model overloaded" };
+  expect(await make(sse({ result: { structuredContent: failed } })).c.getResearch("r1")).toEqual(
+    failed,
+  );
+  const text = sse({ result: { content: [{ text: JSON.stringify(failed) }] } });
+  expect(await make(text).c.getResearch("r1")).toEqual(failed);
+});
+
+test("isError raises even when the payload carries a string status", async () => {
+  const body = sse({
+    result: { isError: true, structuredContent: { status: "failed", error: "nope" } },
+  });
+  const err = await make(body)
+    .c.getResearch("r1")
+    .catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(TavilyRequestError);
+  expect(err).toMatchObject({ message: "nope" });
+});
+
+test("malformed structuredContent throws TavilyRequestError, not SyntaxError", async () => {
+  const err = await make(sse({ result: { structuredContent: "{not json" } }))
+    .c.search({})
+    .catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(TavilyRequestError);
+  expect((err as Error).message).toContain("malformed structuredContent");
+});
+
 test("a JSON-RPC error throws a plain Error with its message", async () => {
   const err = await make(sse({ error: { message: "rpc boom" } }))
     .c.search({})
