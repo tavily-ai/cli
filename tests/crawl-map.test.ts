@@ -113,6 +113,25 @@ test("crawl --output-dir writes one file per page with content and reports on st
   expect(io.stdout()).toBe("");
 });
 
+test("crawl --output-dir still honours --json and -o", async () => {
+  const base = tmp();
+  const dir = join(base, "pages");
+  const file = join(base, "crawl.json");
+  const crawl = vi.fn(async () => crawlFixture);
+  await runProgram(
+    ["crawl", "https://a.example", "--output-dir", dir, "--json"],
+    stubClient({ crawl }),
+  );
+  expect(JSON.parse(io.stdout())).toEqual(crawlFixture);
+  expect(readdirSync(dir)).toHaveLength(2);
+
+  await runProgram(
+    ["crawl", "https://a.example", "--output-dir", dir, "-o", file],
+    stubClient({ crawl }),
+  );
+  expect(JSON.parse(readFileSync(file, "utf8"))).toEqual(crawlFixture);
+});
+
 test("crawl --output-dir gives colliding slugs distinct files", async () => {
   const dir = join(tmp(), "pages");
   const data = {

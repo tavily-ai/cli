@@ -44,6 +44,7 @@ export function printCrawlResults(
 ): void {
   if (opts.outputDir) {
     saveCrawlToDir(data, opts.outputDir);
+    emitIfRequested(data, opts);
     return;
   }
   if (emitIfRequested(data, opts)) return;
