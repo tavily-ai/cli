@@ -1,4 +1,5 @@
 /** tvly init — authenticate, install Tavily skills, and verify a working CLI. */
+import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import type { Command } from "commander";
 import { getClientOrKeyless } from "../core/client-factory.js";
@@ -10,6 +11,7 @@ import {
   saveApiKey,
   saveOauthSession,
 } from "../core/config.js";
+import { detectInstall } from "../core/install-detect.js";
 import { looksHeadless, runBrowserLogin } from "../core/oauth.js";
 import {
   detectAgents,
@@ -33,6 +35,8 @@ export interface InitDeps extends ConfigOptions {
   stdinIsTTY?: boolean;
   confirm?: (question: string) => Promise<boolean>;
   client?: TavilyClientLike;
+  detectInstall?: typeof detectInstall;
+  spawnImpl?: typeof spawnSync;
 }
 
 export interface InitOptions {
@@ -52,6 +56,7 @@ interface InitResult {
   auth: { authenticated: boolean; method: string };
   skills: { source: string; agents: string[]; restart_required: boolean; skipped: boolean };
   verification: { cli: boolean; auth: boolean; live_search: boolean };
+  install: { global: boolean };
   error?: { stage: string; message: string };
 }
 
@@ -110,8 +115,48 @@ export async function run(opts: InitOptions, cmd: Command, deps: InitDeps = {}):
     return fail(result, "live_search", "Tavily search returned no result payload.", 4, json);
   }
 
+  result.install.global = await offerGlobalInstall(opts, json, which, deps);
   result.ok = true;
   printResult(result, json);
+}
+
+const GLOBAL_INSTALL_HINT = "Run `npm install -g @tavily/cli` to install tvly globally.";
+
+/** When running from an npx cache, offer to install tvly globally so agents can run it. */
+async function offerGlobalInstall(
+  opts: InitOptions,
+  json: boolean,
+  which: (name: string) => string | null,
+  deps: InitDeps,
+): Promise<boolean> {
+  const isTTY = deps.stdinIsTTY ?? process.stdin.isTTY === true;
+  if (json || !isTTY || (deps.detectInstall ?? detectInstall)({ which }).method !== "npx") {
+    return false;
+  }
+  const ok =
+    opts.yes ||
+    (await (deps.confirm ?? promptConfirm)("Install tvly globally so your agents can run it?"));
+  if (!ok) return false;
+
+  const npm = which("npm");
+  if (!npm) {
+    err(GLOBAL_INSTALL_HINT);
+    return false;
+  }
+  const win = process.platform === "win32";
+  const r = (deps.spawnImpl ?? spawnSync)(
+    win ? `"${npm}"` : npm,
+    ["install", "-g", "@tavily/cli"],
+    {
+      stdio: "inherit",
+      shell: win,
+    },
+  );
+  if (r.status !== 0) {
+    err(GLOBAL_INSTALL_HINT);
+    return false;
+  }
+  return true;
 }
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -188,6 +233,7 @@ function emptyResult(agents: string[]): InitResult {
     auth: { authenticated: false, method: "none" },
     skills: { source: SKILLS_REPO, agents, restart_required: false, skipped: false },
     verification: { cli: false, auth: false, live_search: false },
+    install: { global: false },
   };
 }
 
@@ -224,6 +270,7 @@ function printResult(result: InitResult, json: boolean): void {
   if (skills.skipped) out(`    ${colors.dim("• Skills skipped")}`);
   else out(`    ${colors.green("✓")} Tavily skills ready for ${skills.agents.join(", ")}`);
   out(`    ${colors.green("✓")} Live search verified`);
+  if (result.install.global) out(`    ${colors.green("✓")} tvly installed globally`);
 
   if (skills.restart_required) {
     out();

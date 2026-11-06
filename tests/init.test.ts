@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { CommanderError } from "commander";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { type InitDeps, run } from "../src/commands/init.js";
+import type { InstallInfo } from "../src/core/install-detect.js";
 import { ExitError } from "../src/errors.js";
 import { buildProgram } from "../src/program.js";
 import { captureOutput } from "./helpers/capture.js";
@@ -182,5 +183,63 @@ describe("init", () => {
     const output = stdoutJson();
     expect(output.mode).toBe("keyless");
     expect(output.skills.skipped).toBe(true);
+  });
+});
+
+describe("init global install offer", () => {
+  const installedVia = (method: InstallInfo["method"]) => (): InstallInfo => ({
+    method,
+    command: null,
+    blockedReason: null,
+  });
+
+  function setup(method: InstallInfo["method"], answer: boolean) {
+    const confirm = vi.fn(async () => answer);
+    const spawnImpl = vi.fn(() => ({ status: 0 }));
+    const deps: InitDeps = {
+      home,
+      env: { TAVILY_API_KEY: "tvly-test" },
+      which: (name) => `/usr/bin/${name}`,
+      client: okClient,
+      stdinIsTTY: true,
+      detectInstall: installedVia(method),
+      confirm,
+      spawnImpl: spawnImpl as unknown as NonNullable<InitDeps["spawnImpl"]>,
+    };
+    return { deps, confirm, spawnImpl };
+  }
+
+  test("npx run installs globally when confirmed", async () => {
+    const { deps, confirm, spawnImpl } = setup("npx", true);
+    expect(await runInit(["--skip-skills"], deps)).toBe(0);
+    expect(confirm).toHaveBeenCalledWith("Install tvly globally so your agents can run it?");
+    expect(spawnImpl).toHaveBeenCalledWith(
+      "/usr/bin/npm",
+      ["install", "-g", "@tavily/cli"],
+      expect.objectContaining({ stdio: "inherit" }),
+    );
+    expect(io.stdout()).toContain("tvly installed globally");
+  });
+
+  test("npx run skips the install when declined", async () => {
+    const { deps, spawnImpl } = setup("npx", false);
+    expect(await runInit(["--skip-skills"], deps)).toBe(0);
+    expect(spawnImpl).not.toHaveBeenCalled();
+    expect(io.stdout()).not.toContain("tvly installed globally");
+  });
+
+  test("a global npm install is not offered a global install", async () => {
+    const { deps, confirm, spawnImpl } = setup("npm", true);
+    expect(await runInit(["--skip-skills"], deps)).toBe(0);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(spawnImpl).not.toHaveBeenCalled();
+  });
+
+  test("--json never prompts or installs", async () => {
+    const { deps, confirm, spawnImpl } = setup("npx", true);
+    expect(await runInit(["--skip-skills", "--json"], deps)).toBe(0);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(spawnImpl).not.toHaveBeenCalled();
+    expect(stdoutJson().install).toEqual({ global: false });
   });
 });
