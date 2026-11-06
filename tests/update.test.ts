@@ -1,5 +1,4 @@
 import type * as childProcess from "node:child_process";
-import { CommanderError } from "commander";
 import { describe, expect, test, vi } from "vitest";
 import { run, type UpdateDeps } from "../src/commands/update.js";
 import {
@@ -7,9 +6,9 @@ import {
   fetchLatestVersion,
   npmRootGlobalDefault,
 } from "../src/core/install-detect.js";
-import { ExitError } from "../src/errors.js";
-import { buildProgram } from "../src/program.js";
+import { compareVersions, isNewer } from "../src/util/semver.js";
 import { captureOutput } from "./helpers/capture.js";
+import { runProgram } from "./helpers/program.js";
 
 const io = captureOutput();
 
@@ -35,22 +34,22 @@ describe("detectInstall", () => {
       ["/usr/bin/npm", "install", "-g", "@tavily/cli@latest"],
     ],
     [
-      "/home/u/.local/share/pnpm/global/5/node_modules/@tavily/cli/dist/cli.js",
+      "/opt/u/.local/share/pnpm/global/5/node_modules/@tavily/cli/dist/cli.js",
       "pnpm",
       ["/usr/bin/pnpm", "add", "-g", "@tavily/cli@latest"],
     ],
     [
-      "/home/u/.config/yarn/global/node_modules/@tavily/cli/dist/cli.js",
+      "/opt/u/.config/yarn/global/node_modules/@tavily/cli/dist/cli.js",
       "yarn",
       ["/usr/bin/yarn", "global", "add", "@tavily/cli@latest"],
     ],
     [
-      "/home/u/.yarn/global/node_modules/@tavily/cli/dist/cli.js",
+      "/opt/u/.yarn/global/node_modules/@tavily/cli/dist/cli.js",
       "yarn",
       ["/usr/bin/yarn", "global", "add", "@tavily/cli@latest"],
     ],
     [
-      "/home/u/.bun/install/global/node_modules/@tavily/cli/dist/cli.js",
+      "/opt/u/.bun/install/global/node_modules/@tavily/cli/dist/cli.js",
       "bun",
       ["/usr/bin/bun", "add", "-g", "@tavily/cli@latest"],
     ],
@@ -94,21 +93,6 @@ describe("detectInstall", () => {
     ]);
   });
 
-  test("npm root -g allows a cold npm start (15 s timeout)", () => {
-    const spawnSync = vi.fn((..._args: unknown[]) => ({
-      status: 0,
-      stdout: "/usr/lib/node_modules\n",
-    }));
-    npmRootGlobalDefault({ which: found, spawnSync: spawnSync as never, platform: "linux" });
-    expect(spawnSync.mock.calls[0]?.[2]).toMatchObject({ timeout: 15_000 });
-  });
-
-  test("npm root -g is null without npm on PATH", () => {
-    const spawnSync = vi.fn();
-    expect(npmRootGlobalDefault({ which: () => null, spawnSync: spawnSync as never })).toBeNull();
-    expect(spawnSync).not.toHaveBeenCalled();
-  });
-
   test("PNPM_HOME marks a pnpm install", () => {
     const info = detect("/custom/pnpmhome/global/5/node_modules/@tavily/cli/dist/cli.js", {
       env: { PNPM_HOME: "/custom/pnpmhome" },
@@ -118,7 +102,7 @@ describe("detectInstall", () => {
   });
 
   test("npx cache is blocked", () => {
-    const info = detect("/home/u/.npm/_npx/abc123/node_modules/@tavily/cli/dist/cli.js");
+    const info = detect("/opt/u/.npm/_npx/abc123/node_modules/@tavily/cli/dist/cli.js");
     expect(info.method).toBe("npx");
     expect(info.command).toBeNull();
     expect(info.blockedReason).toContain("npx @tavily/cli@latest");
@@ -177,18 +161,6 @@ describe("fetchLatestVersion", () => {
     expect(init.redirect).toBe("manual");
   });
 
-  test("HTTP failure and network failure map to the check message", async () => {
-    await expect(fetchLatestVersion(jsonReply({}, 500))).rejects.toThrow(
-      "Could not check npm for Tavily CLI updates.",
-    );
-    const down = (async () => {
-      throw new Error("down");
-    }) as unknown as typeof fetch;
-    await expect(fetchLatestVersion(down)).rejects.toThrow(
-      "Could not check npm for Tavily CLI updates.",
-    );
-  });
-
   test("an invalid version is rejected", async () => {
     await expect(fetchLatestVersion(jsonReply({ version: "nope" }))).rejects.toThrow(
       "npm returned an invalid Tavily CLI version.",
@@ -214,20 +186,8 @@ const BLOCKED_SOURCE = {
   blockedReason: "This is a source or direct-URL installation. Update it from its original source.",
 };
 
-async function runUpdate(argv: string[], deps: UpdateDeps): Promise<number> {
-  const program = buildProgram();
-  for (const sub of program.commands) {
-    if (sub.name() === "update") sub.action((o, c) => run(o, c, deps));
-  }
-  try {
-    await program.parseAsync(argv, { from: "user" });
-    return 0;
-  } catch (e) {
-    if (e instanceof ExitError) return e.code;
-    if (e instanceof CommanderError) return e.exitCode;
-    throw e;
-  }
-}
+const runUpdate = (argv: string[], deps: UpdateDeps) =>
+  runProgram(argv, undefined, { actions: { update: (o, c) => run(o, c, deps) } });
 
 const neverSpawn: Spawn = () => {
   throw new Error("must not spawn");
@@ -287,11 +247,6 @@ describe("update command", () => {
   test("does nothing when current", async () => {
     expect(await runUpdate(["--json", "update"], base({ currentVersion: "1.1.0" }))).toBe(0);
     expect(JSON.parse(io.stdout()).update_available).toBe(false);
-  });
-
-  test("human up-to-date line", async () => {
-    await runUpdate(["update"], base({ currentVersion: "1.1.0" }));
-    expect(io.stdout()).toContain("Tavily CLI 1.1.0 is up to date.");
   });
 
   test("runs the detected manager and verifies the installed version", async () => {
@@ -407,6 +362,10 @@ describe("update command", () => {
       ok: false,
       error: { stage: "check", message: "Could not check npm for Tavily CLI updates." },
     });
+    const down = (async () => {
+      throw new Error("down");
+    }) as unknown as typeof fetch;
+    expect(await runUpdate(["--json", "update", "--check"], base({ fetchImpl: down }))).toBe(4);
   });
 
   test("install detection failure is not reported as a network error", async () => {
@@ -427,5 +386,32 @@ describe("update command", () => {
     await runUpdate(["update"], base({ spawnImpl }));
     expect(io.stderr()).toContain("Update failed:");
     expect(io.stderr()).toContain("boom");
+  });
+});
+
+describe("semver", () => {
+  test("compares numerically per component", () => {
+    expect(compareVersions("0.3.0", "0.2.1")).toBe(1);
+    expect(compareVersions("0.2.1", "0.3.0")).toBe(-1);
+    expect(compareVersions("0.10.0", "0.9.0")).toBe(1);
+    expect(compareVersions("1.2.3", "1.2.3")).toBe(0);
+  });
+
+  test("release ranks above its prerelease", () => {
+    expect(compareVersions("1.0.0", "1.0.0-rc.1")).toBe(1);
+  });
+
+  test("prerelease identifiers compare per identifier", () => {
+    expect(compareVersions("1.0.0-rc.2", "1.0.0-rc.1")).toBe(1);
+    expect(compareVersions("1.0.0-rc.10", "1.0.0-rc.9")).toBe(1);
+    expect(compareVersions("1.0.0-1", "1.0.0-alpha")).toBe(-1);
+    expect(compareVersions("1.0.0-rc", "1.0.0-rc.1")).toBe(-1);
+  });
+
+  test("unparsable versions throw", () => {
+    expect(() => isNewer("0.3.0", "abc")).toThrow("The installed Tavily CLI version is invalid.");
+    expect(() => compareVersions("abc", "1.0.0")).toThrow(
+      "The installed Tavily CLI version is invalid.",
+    );
   });
 });

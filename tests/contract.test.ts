@@ -18,7 +18,7 @@
  *   response_time, and the fixture uses non-integer response times anyway.
  * - Exit codes must match.
  * - update --check: the Python run queried PyPI (latest was 0.2.1, its own version); the TypeScript
- *   run's hard-coded npm registry request is redirected by tests/helpers/registry-redirect.mjs to
+ *   run's hard-coded npm registry request is redirected by tests/helpers/fetch-redirect.mjs to
  *   the fixture server, which answers with the TypeScript CLI's own version, so both are "up to
  *   date". install_method and blocked_reason describe the installation (uvx vs. a checkout) and are
  *   compared by type only; every other key, the key set, and the plain text are compared.
@@ -37,7 +37,7 @@ import { type Routes, startFixtureServer } from "./helpers/fixture-server.js";
 
 const FIXTURES = fileURLToPath(new URL("./fixtures/contract/", import.meta.url));
 const CLI = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
-const REDIRECT = fileURLToPath(new URL("./helpers/registry-redirect.mjs", import.meta.url));
+const REDIRECT = fileURLToPath(new URL("./helpers/fetch-redirect.mjs", import.meta.url));
 const PYTHON_VERSION = "0.2.1";
 const HOME_PATTERN = /\/tmp\/tvly-[A-Za-z0-9]{6}/g;
 const INSTALL_SPECIFIC = ["install_method", "blocked_reason"];
@@ -82,7 +82,7 @@ function runTs(args: string[]): Promise<{ stdout: string; code: number }> {
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
         LANG: "en_US.UTF-8",
         TAVILY_API_BASE_URL: server.url,
-        TVLY_FIXTURE_REGISTRY: server.url,
+        TVLY_FIXTURE_URL: server.url,
       },
       stdio: ["ignore", "pipe", "pipe"],
     });

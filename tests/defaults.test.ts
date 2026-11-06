@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CommanderError } from "commander";
 import { expect, test } from "vitest";
 import { type DefaultsDeps, runSetDefault, runUnsetDefault } from "../src/commands/defaults.js";
 import {
@@ -10,8 +9,8 @@ import {
   unsetClaudeDefault,
   unsetCodexDefault,
 } from "../src/core/agent-defaults.js";
-import { buildProgram } from "../src/program.js";
 import { captureOutput } from "./helpers/capture.js";
+import { runProgram } from "./helpers/program.js";
 
 const io = captureOutput();
 
@@ -27,20 +26,13 @@ function setup() {
 }
 
 /** Run the real command tree with injected paths and prompt; returns the exit code. */
-async function run(argv: string[], deps: DefaultsDeps): Promise<number> {
-  const program = buildProgram();
-  for (const sub of program.commands) {
-    if (sub.name() === "set-default") sub.action((o, c) => runSetDefault(o, c, deps));
-    if (sub.name() === "unset-default") sub.action((o, c) => runUnsetDefault(o, c, deps));
-  }
-  try {
-    await program.parseAsync(argv, { from: "user" });
-    return 0;
-  } catch (e) {
-    if (e instanceof CommanderError) return e.exitCode === 0 ? 0 : 2;
-    throw e;
-  }
-}
+const run = (argv: string[], deps: DefaultsDeps) =>
+  runProgram(argv, undefined, {
+    actions: {
+      "set-default": (o, c) => runSetDefault(o, c, deps),
+      "unset-default": (o, c) => runUnsetDefault(o, c, deps),
+    },
+  });
 
 const readJson = (path: string) => JSON.parse(readFileSync(path, "utf8"));
 

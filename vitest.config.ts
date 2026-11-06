@@ -3,6 +3,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     testTimeout: 20000,
+    // Builds dist/ once, so `npx vitest run` works without `npm run build` first.
+    globalSetup: ["tests/helpers/build-dist.ts"],
     // The cold-start timing test runs after every other file so parallel load cannot skew it.
     projects: [
       {

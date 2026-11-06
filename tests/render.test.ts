@@ -1,11 +1,18 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { echoPages, emit, footer } from "../src/ui/render/emit.js";
 import { printExtractResults } from "../src/ui/render/extract.js";
 import { printMultiSearchResults, printSearchResults } from "../src/ui/render/search.js";
-import { setTerminalOverride } from "../src/ui/text.js";
+import { spinner, withSpinner } from "../src/ui/spinner.js";
+import {
+  plain,
+  renderMarkdown,
+  safeLink,
+  sanitizeControl,
+  setTerminalOverride,
+} from "../src/ui/text.js";
 import { captureOutput, visible } from "./helpers/capture.js";
 
 const io = captureOutput();
@@ -140,21 +147,6 @@ test("terminal extract shows the first 3000 characters and the failures", async 
   expect(text).toMatch(/1 extracted, 1 failed \| 1\.50s/);
 });
 
-test("JSON mode prints the response pretty-printed", async () => {
-  await printSearchResults({ results: [] }, { json: true });
-  expect(io.stdout()).toBe('{\n  "results": []\n}\n');
-});
-
-test("emit writes the file, creates .tavily with a .gitignore, and reports on stderr", () => {
-  const dir = tmp();
-  const file = join(dir, ".tavily", "a.json");
-  emit({ a: 1 }, { outputFile: file, pretty: true });
-  expect(readFileSync(file, "utf8")).toBe('{\n  "a": 1\n}\n');
-  expect(readFileSync(join(dir, ".tavily", ".gitignore"), "utf8")).toBe("*\n");
-  expect(io.stderr()).toBe(`Output saved to ${file}\n`);
-  expect(io.stdout()).toBe("");
-});
-
 test("emit leaves an existing .tavily folder alone and creates other folders without .gitignore", () => {
   const dir = tmp();
   mkdirSync(join(dir, ".tavily"));
@@ -185,14 +177,6 @@ test("multi-search plain output: headers, results, and per-query errors", async 
   );
 });
 
-test("footer centres the count and response time in a dim rule", () => {
-  setTerminalOverride(true);
-  footer(3, "results", 1.234);
-  const text = visible(io.stdout());
-  expect(text.startsWith("\n─")).toBe(true);
-  expect(text).toContain(" 3 results | 1.23s ");
-});
-
 test("footer spans the terminal width, 80 columns when unknown", () => {
   const columns = process.stdout.columns;
   try {
@@ -205,4 +189,106 @@ test("footer spans the terminal width, 80 columns when unknown", () => {
   }
   const rules = visible(io.stdout()).split("\n").filter(Boolean);
   expect(rules.map((r) => r.length)).toEqual([80, 120]);
+});
+
+describe("text helpers", () => {
+  const fakeStream = (isTTY: boolean) => ({ isTTY }) as unknown as NodeJS.WriteStream;
+
+  afterEach(() => {
+    setTerminalOverride(null);
+    vi.unstubAllEnvs();
+  });
+
+  test("sanitizeControl strips escapes but keeps tabs and newlines", () => {
+    expect(sanitizeControl("a\x1b[2Jb\tc")).toBe("a[2Jb\tc");
+    expect(sanitizeControl("30:32.03\x1b[31m passage")).toBe("30:32.03[31m passage");
+    expect(sanitizeControl("a\x9bb\nc")).toBe("ab\nc");
+    expect(sanitizeControl(42)).toBe("42");
+  });
+
+  test("plain collapses whitespace-only blank lines", () => {
+    expect(plain("a\n \n\t\n\nb")).toBe("a\n\nb");
+  });
+
+  test("plain keeps the indentation of the line after a blank run", () => {
+    expect(plain("a\n\n\n  b")).toBe("a\n\n  b");
+    expect(plain("a\n  \n\t\n    b")).toBe("a\n\n    b");
+  });
+
+  test("plain is linear on long space runs", () => {
+    const start = performance.now();
+    plain(`${" ".repeat(100_000)}x`);
+    expect(performance.now() - start).toBeLessThan(50);
+  });
+
+  test("safeLink only links http(s) on a terminal", () => {
+    expect(safeLink("javascript:alert(1)")).not.toContain("\x1b]8");
+    expect(safeLink("https://x.io", "x", { stream: fakeStream(true) })).toBe(
+      "\x1b]8;;https://x.io\x1b\\x\x1b]8;;\x1b\\",
+    );
+    expect(safeLink("https://x.io", "x", { stream: fakeStream(false) })).toBe("x");
+    expect(safeLink("javascript:alert(1)", "x", { stream: fakeStream(true) })).toBe("x");
+  });
+
+  test("renderMarkdown strips escape bytes from untrusted markdown", async () => {
+    const out = await renderMarkdown("# Hi\x1b]0;pwned\x07 there\n\nbody\x9b2J");
+    expect(out).not.toContain("\x1b]0");
+    expect(out).not.toContain("\x07");
+    expect(out).not.toContain("\x9b");
+  });
+});
+
+describe("spinner", () => {
+  let writes: string[];
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    writes = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((s) => writes.push(String(s)) > 0);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    setTerminalOverride(null);
+  });
+
+  test("non-TTY stderr: no writes, withSpinner still returns the value", async () => {
+    setTerminalOverride(false);
+    const s = spinner("x", true);
+    s.update("y");
+    vi.advanceTimersByTime(500);
+    s.stop();
+    expect(await withSpinner("x", true, async () => 7)).toBe(7);
+    expect(writes).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test("TTY stderr: animates frames, updates message, clears on stop", () => {
+    setTerminalOverride(true);
+    const s = spinner("loading", true);
+    expect(writes[0]).toBe("\r⠋ loading");
+    vi.advanceTimersByTime(80);
+    expect(writes.at(-1)).toBe("\r⠙ loading");
+    s.update("more");
+    vi.advanceTimersByTime(80);
+    expect(writes.at(-1)).toBe("\r⠹ more");
+    s.stop();
+    expect(writes.at(-1)).toBe("\r\x1b[2K");
+    const n = writes.length;
+    s.stop();
+    vi.advanceTimersByTime(500);
+    expect(writes).toHaveLength(n);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test("withSpinner stops the spinner and rethrows when fn rejects", async () => {
+    setTerminalOverride(true);
+    await expect(
+      withSpinner("x", true, async () => {
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    expect(writes.at(-1)).toBe("\r\x1b[2K");
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });

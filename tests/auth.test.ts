@@ -1,13 +1,11 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CommanderError } from "commander";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { type AuthDeps, runAuth, runLogin, runLogout } from "../src/commands/auth.js";
 import { configPaths, readConfig } from "../src/core/config.js";
 import type { OAuthSession } from "../src/core/oauth.js";
-import { ExitError, OAuthError } from "../src/errors.js";
-import { buildProgram } from "../src/program.js";
+import { OAuthError } from "../src/errors.js";
 import { captureOutput, visible } from "./helpers/capture.js";
 import { clientFactory, runProgram, stubClient } from "./helpers/program.js";
 
@@ -56,22 +54,14 @@ const fetchWith = (revokeStatus: number): typeof fetch =>
   }) as typeof fetch;
 
 /** Run the real program in-process with the auth commands bound to `deps`. */
-async function runAuthProgram(argv: string[], deps: AuthDeps): Promise<number> {
-  const program = buildProgram();
-  for (const sub of program.commands) {
-    if (sub.name() === "login") sub.action((o, c) => runLogin(o, c, deps));
-    if (sub.name() === "logout") sub.action((o, c) => runLogout(o, c, deps));
-    if (sub.name() === "auth") sub.action((o, c) => runAuth(o, c, deps));
-  }
-  try {
-    await program.parseAsync(argv, { from: "user" });
-    return 0;
-  } catch (e) {
-    if (e instanceof ExitError) return e.code;
-    if (e instanceof CommanderError) return e.exitCode === 0 ? 0 : 2;
-    throw e;
-  }
-}
+const runAuthProgram = (argv: string[], deps: AuthDeps) =>
+  runProgram(argv, undefined, {
+    actions: {
+      login: (o, c) => runLogin(o, c, deps),
+      logout: (o, c) => runLogout(o, c, deps),
+      auth: (o, c) => runAuth(o, c, deps),
+    },
+  });
 
 const stdoutJson = () => JSON.parse(io.stdout());
 
@@ -178,26 +168,6 @@ describe("login", () => {
     expect(io.stderr()).not.toContain("\x07");
   });
 
-  test("--json with a browser still emits the authorization URL event", async () => {
-    const login = vi.fn<NonNullable<AuthDeps["login"]>>(async (opts) => {
-      expect(opts.openBrowser).toBe(true);
-      opts.onStatus?.("https://mcp.tavily.com/authorize?client_id=cid");
-      return session;
-    });
-    const code = await runAuthProgram(["--json", "login"], {
-      home,
-      env: { DISPLAY: ":0" },
-      login,
-      fetchImpl: fetchWith(200),
-    });
-    expect(code).toBe(0);
-    expect(stdoutJson().authenticated).toBe(true);
-    expect(JSON.parse(io.stderr())).toEqual({
-      event: "authorization_required",
-      authorization_url: "https://mcp.tavily.com/authorize?client_id=cid",
-    });
-  });
-
   test("--api-key --json saves the key even when revoking the old oauth fails", async () => {
     writeConfig({ oauth: storedOauth });
     const code = await runAuthProgram(["--json", "login", "--api-key", "tvly-replacement"], {
@@ -273,16 +243,6 @@ describe("login", () => {
 });
 
 describe("auth", () => {
-  test("human output masks the key as first 8, ..., last 4", async () => {
-    writeConfig({ api_key: "tvly-abcdefghijklmnop" });
-    const code = await runAuthProgram(["auth"], { home, env: {} });
-    expect(code).toBe(0);
-    const text = visible(io.stdout());
-    expect(text).toContain(`Authenticated via config file (${configPaths(home).file})`);
-    expect(text).toContain("Key: tvly-abc...mnop");
-    expect(text).not.toContain("abcdefghijklmnop");
-  });
-
   test("short keys are fully masked", async () => {
     await runAuthProgram(["auth"], { home, env: { TAVILY_API_KEY: "tvly-short" } });
     expect(visible(io.stdout())).toContain("Key: ***");

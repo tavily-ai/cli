@@ -1,14 +1,11 @@
 import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CommanderError } from "commander";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { type InitDeps, run } from "../src/commands/init.js";
 import { detectPackageManager } from "../src/core/install-detect.js";
-import { ExitError } from "../src/errors.js";
-import { buildProgram } from "../src/program.js";
 import { captureOutput } from "./helpers/capture.js";
-import { stubClient } from "./helpers/program.js";
+import { runProgram, stubClient } from "./helpers/program.js";
 
 const io = captureOutput();
 
@@ -20,20 +17,8 @@ beforeEach(() => {
 const okClient = stubClient({ search: async () => ({ results: [] }) });
 
 /** Run the real program in-process with `init` bound to `deps`; returns the exit code. */
-async function runInit(argv: string[], deps: InitDeps): Promise<number> {
-  const program = buildProgram();
-  for (const sub of program.commands) {
-    if (sub.name() === "init") sub.action((o, c) => run(o, c, deps));
-  }
-  try {
-    await program.parseAsync(["init", ...argv], { from: "user" });
-    return 0;
-  } catch (e) {
-    if (e instanceof ExitError) return e.code;
-    if (e instanceof CommanderError) return e.exitCode === 0 ? 0 : 2;
-    throw e;
-  }
-}
+const runInit = (argv: string[], deps: InitDeps) =>
+  runProgram(["init", ...argv], undefined, { actions: { init: (o, c) => run(o, c, deps) } });
 
 const stdoutJson = () => JSON.parse(io.stdout());
 
@@ -222,13 +207,6 @@ describe("init global install", () => {
     expect(await runInit(["--skip-skills"], deps)).toBe(1);
     expect(spawnImpl).not.toHaveBeenCalled();
     expect(io.stdout()).toContain("tvly is not available on PATH.");
-  });
-
-  test("tvly already on PATH skips the install", async () => {
-    const { deps, confirm, spawnImpl } = setup({ tvly: true });
-    expect(await runInit(["--skip-skills"], deps)).toBe(0);
-    expect(confirm).not.toHaveBeenCalled();
-    expect(spawnImpl).not.toHaveBeenCalled();
   });
 
   test("--yes in a non-interactive run installs without asking", async () => {

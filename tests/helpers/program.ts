@@ -42,16 +42,27 @@ export function stubClient(methods: Partial<TavilyClientLike>): TavilyClientLike
   };
 }
 
-/** Run the real command tree in-process with `client`, returning the exit code `cli.ts` would set. */
+// biome-ignore lint/suspicious/noExplicitAny: commander passes each action its own argument list
+type Action = (...args: any[]) => void | Promise<void>;
+
+/**
+ * Run the real command tree in-process with `client`, returning the exit code `cli.ts` would set.
+ * `actions` replaces top-level command actions by name, for commands that take injected deps.
+ */
 export async function runProgram(
   argv: string[],
-  client: TavilyClientLike,
-  opts: { stdin?: string } = {},
+  client: TavilyClientLike = stubClient({}),
+  opts: { stdin?: string; actions?: Record<string, Action> } = {},
 ): Promise<number> {
   fake.client = client;
   fake.stdin = opts.stdin ?? "";
+  const program = buildProgram();
+  for (const sub of program.commands) {
+    const action = opts.actions?.[sub.name()];
+    if (action) sub.action(action);
+  }
   try {
-    await buildProgram().parseAsync(argv, { from: "user" });
+    await program.parseAsync(argv, { from: "user" });
     return 0;
   } catch (e) {
     if (e instanceof ExitError) return e.code;

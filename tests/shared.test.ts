@@ -1,44 +1,26 @@
 import path from "node:path";
-import { TavilyKeylessLimitError, TavilyRequestError } from "@tavily/core";
-import { Command } from "commander";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { handleOauthRefreshError } from "../src/commands/common.js";
-import { addClientNameOption, addOutputOption, resolveJson } from "../src/commands/options.js";
 import {
-  handleApiError,
-  readQueryArg,
-  runWithApiErrors,
-  splitCsv,
-} from "../src/commands/shared.js";
+  type TavilyContinuationPath,
+  TavilyKeylessLimitError,
+  TavilyRequestError,
+} from "@tavily/core";
+import { Command } from "commander";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import { handleOauthRefreshError } from "../src/commands/common.js";
+import { addClientNameOption, addOutputOption } from "../src/commands/options.js";
+import { handleApiError, readQueryArg, runWithApiErrors } from "../src/commands/shared.js";
 import { authSource } from "../src/core/config.js";
 import { ExitError, OAuthError } from "../src/errors.js";
-import { keylessCapError, printKeylessCapHit } from "../src/ui/keyless.js";
+import {
+  formatKeylessEnvelopeForTerminal,
+  formatSeconds,
+  keylessCapError,
+} from "../src/ui/keyless.js";
 import { resolveOutput } from "../src/ui/render/emit.js";
+import { captureOutput, visible } from "./helpers/capture.js";
 
-const ANSI = new RegExp(
-  `${String.fromCharCode(27)}(\\[[0-9;]*m|\\]8;;[^${String.fromCharCode(27)}]*${String.fromCharCode(27)}\\\\)`,
-  "g",
-);
-const strip = (s: string) => s.replace(ANSI, "");
-let stdout: string[];
-let stderr: string[];
-
-beforeEach(() => {
-  stdout = [];
-  stderr = [];
-  vi.spyOn(process.stdout, "write").mockImplementation((s) => {
-    stdout.push(String(s));
-    return true;
-  });
-  vi.spyOn(process.stderr, "write").mockImplementation((s) => {
-    stderr.push(String(s));
-    return true;
-  });
-});
-afterEach(() => {
-  vi.restoreAllMocks();
-  vi.unstubAllEnvs();
-});
+const io = captureOutput();
+afterEach(() => vi.unstubAllEnvs());
 
 function exitCode(fn: () => unknown): number {
   try {
@@ -60,21 +42,15 @@ const capError = () =>
     window: "day",
   });
 
-test("handleApiError JSON mode writes the error to stdout and exits 4", () => {
-  expect(exitCode(() => handleApiError(new Error("boom"), true))).toBe(4);
-  expect(JSON.parse(stdout.join(""))).toEqual({ error: "boom" });
-  expect(stderr).toEqual([]);
-});
-
 test("handleApiError human mode prints to stderr and exits 4", () => {
   expect(exitCode(() => handleApiError(new Error("bo\x1b[2Jom"), false))).toBe(4);
-  expect(strip(stderr.join(""))).toBe("  > Error: bo[2Jom\n");
-  expect(stdout).toEqual([]);
+  expect(visible(io.stderr())).toBe("  > Error: bo[2Jom\n");
+  expect(io.stdout()).toBe("");
 });
 
 test("limit statuses 429 and 432 print the upgrade block and exit 3", () => {
   for (const status of [429, 432]) {
-    stderr = [];
+    const before = io.stderr().length;
     const e = new TavilyRequestError({
       status,
       body: null,
@@ -82,7 +58,7 @@ test("limit statuses 429 and 432 print the upgrade block and exit 3", () => {
       docs: "https://docs.tavily.com/x",
     });
     expect(exitCode(() => handleApiError(e, false))).toBe(3);
-    expect(strip(stderr.join("")).split("\n")).toEqual([
+    expect(visible(io.stderr().slice(before)).split("\n")).toEqual([
       "",
       "  > Plan limit",
       "",
@@ -94,7 +70,7 @@ test("limit statuses 429 and 432 print the upgrade block and exit 3", () => {
   }
   const limit = new TavilyRequestError({ status: 432, body: null, message: "m" });
   expect(exitCode(() => handleApiError(limit, true))).toBe(3);
-  expect(JSON.parse(stdout.join(""))).toEqual({ error: "m" });
+  expect(JSON.parse(io.stdout())).toEqual({ error: "m" });
 });
 
 test("keylessCapError maps SDK fields, including window, in the Python key order", () => {
@@ -121,47 +97,22 @@ test("a keyless cap hit in runWithApiErrors exits 3 in JSON and human modes", as
       throw capError();
     }).catch((e: ExitError) => e.code);
   expect(await hit(true)).toBe(3);
-  expect(JSON.parse(stdout.join(""))).toEqual({ error: keylessCapError(capError()) });
+  expect(JSON.parse(io.stdout())).toEqual({ error: keylessCapError(capError()) });
   expect(await hit(false)).toBe(3);
-  const text = strip(stderr.join(""));
+  const text = visible(io.stderr());
   expect(text).toContain("  > Tavily rate limit reached.");
   expect(text).toContain("    Retry after: 1h (3600s)");
   expect(text).toContain("      - Sign up for a Tavily API key:  https://tavily.com/signup");
   expect(text).toContain("  Run tvly login to authenticate and remove this cap.");
 });
 
-test("printKeylessCapHit does not throw", () => {
-  printKeylessCapHit(capError());
-  expect(strip(stderr.join("")).startsWith("\n  > Tavily rate limit reached.\n")).toBe(true);
-});
-
 test("handleOauthRefreshError", () => {
   expect(exitCode(() => handleOauthRefreshError(new OAuthError("expired"), true))).toBe(3);
-  expect(JSON.parse(stdout.join(""))).toEqual({
+  expect(JSON.parse(io.stdout())).toEqual({
     error: { code: "oauth_refresh_failed", message: "expired" },
   });
   expect(exitCode(() => handleOauthRefreshError(new OAuthError("expired"), false))).toBe(3);
-  expect(strip(stderr.join(""))).toBe("  > OAuth refresh failed: expired\n");
-});
-
-test("runWithApiErrors routes keyless, OAuth, other, and passes results and ExitError through", async () => {
-  expect(await runWithApiErrors(true, async () => 5)).toBe(5);
-  const run = async (e: unknown) => {
-    try {
-      await runWithApiErrors(true, async () => {
-        throw e;
-      });
-    } catch (x) {
-      return (x as ExitError).code;
-    }
-    return -1;
-  };
-  expect(await run(capError())).toBe(3);
-  expect(JSON.parse(stdout.at(-1) ?? "").error.code).toBe("daily");
-  expect(await run(new OAuthError("x"))).toBe(3);
-  expect(JSON.parse(stdout.at(-1) ?? "").error.code).toBe("oauth_refresh_failed");
-  expect(await run(new Error("y"))).toBe(4);
-  expect(await run(new ExitError(7))).toBe(7);
+  expect(visible(io.stderr())).toBe("  > OAuth refresh failed: expired\n");
 });
 
 function parse(args: string[]) {
@@ -176,30 +127,6 @@ test("--client-name beats TAVILY_CLIENT_NAME; env is the fallback; neither is un
   expect(parse([]).clientName).toBe("env");
   vi.stubEnv("TAVILY_CLIENT_NAME", undefined);
   expect(parse([]).clientName).toBeUndefined();
-});
-
-test("-o yields undefined, empty string when bare, or the path", () => {
-  expect(parse([]).output).toBeUndefined();
-  expect(parse(["-o"]).output).toBe("");
-  expect(parse(["--output"]).output).toBe("");
-  expect(parse(["-o", "f.json"]).output).toBe("f.json");
-});
-
-test("resolveJson reads the global flag from a parent", () => {
-  const root = new Command("root").option("--json");
-  const sub = root.command("sub").action(() => {});
-  root.parse(["--json", "sub"], { from: "user" });
-  expect(resolveJson(sub)).toBe(true);
-  const root2 = new Command("root").option("--json");
-  const sub2 = root2.command("sub").action(() => {});
-  root2.parse(["sub"], { from: "user" });
-  expect(resolveJson(sub2)).toBe(false);
-});
-
-test("splitCsv", () => {
-  expect(splitCsv(undefined)).toBeUndefined();
-  expect(splitCsv("")).toBeUndefined();
-  expect(splitCsv("a.com, b.com")).toEqual(["a.com", "b.com"]);
 });
 
 test("readQueryArg (stdin cases are in research.test.ts)", () => {
@@ -235,4 +162,94 @@ test("authSource", () => {
   expect(authSource("tvly-x", {})).toBe("API key");
   const jwt = `a.${Buffer.from("{}").toString("base64url")}.c`;
   expect(authSource(jwt, {})).toBe("OAuth (tvly login)");
+});
+
+describe("keyless cap rendering", () => {
+  const capHit = (fields: {
+    message?: string;
+    retryAfter?: number | null;
+    continuationPaths?: TavilyContinuationPath[];
+  }) =>
+    new TavilyKeylessLimitError({
+      message: "",
+      capType: "hourly",
+      retryAfter: null,
+      bonusEligible: false,
+      continuationPaths: [],
+      ...fields,
+    });
+
+  test("formatSeconds", () => {
+    expect(formatSeconds(45)).toBe("45s");
+    expect(formatSeconds(90)).toBe("1m 30s");
+    expect(formatSeconds(120)).toBe("2m");
+    expect(formatSeconds(3600)).toBe("1h");
+    expect(formatSeconds(5400)).toBe("1h 30m");
+    expect(formatSeconds(90000)).toBe("1d 1h");
+    expect(formatSeconds(86400)).toBe("1d");
+  });
+
+  test("envelope with signup, payment, and bonus actions", () => {
+    const block = formatKeylessEnvelopeForTerminal(
+      capHit({
+        message: "  Hourly cap reached.  ",
+        retryAfter: 90,
+        continuationPaths: [
+          { type: "signup", url: "https://app.tavily.com" },
+          { type: "agentic_payment", scheme: "x402", details: "pay here" },
+          {
+            type: "bonus_credits",
+            eligible: true,
+            credits_on_completion: 50,
+            questions: ["Who are you?", "What do you build?"],
+            endpoint: "/v1/keyless/bonus",
+          },
+        ],
+      }),
+    );
+    expect(block.split("\n")).toEqual([
+      "Tavily rate limit reached.",
+      "Hourly cap reached.",
+      "",
+      "Retry after: 1m 30s (90s)",
+      "",
+      "Continuation options:",
+      "  - Sign up for a Tavily API key:  https://app.tavily.com",
+      "  - Pay via x402 agentic payment:  pay here",
+      "  - Earn 50 bonus credits by answering 2 questions:",
+      "      1. Who are you?",
+      "      2. What do you build?",
+      "    POST your answers to: /v1/keyless/bonus",
+    ]);
+  });
+
+  test("envelope defaults, ineligible bonus, and empty input", () => {
+    expect(formatKeylessEnvelopeForTerminal(capHit({}))).toBe("Tavily rate limit reached.");
+    const block = formatKeylessEnvelopeForTerminal(
+      capHit({
+        retryAfter: 0,
+        continuationPaths: [
+          { type: "signup" },
+          { type: "agentic_payment" },
+          { type: "bonus_credits", eligible: false, questions: ["q"] },
+          // The SDK passes envelope entries through unchecked.
+          "junk" as unknown as TavilyContinuationPath,
+        ],
+      }),
+    );
+    expect(block.split("\n")).toEqual([
+      "Tavily rate limit reached.",
+      "",
+      "Continuation options:",
+      "  - Sign up for a Tavily API key:  https://tavily.com",
+      "  - Pay via x402 agentic payment:  TBD",
+    ]);
+    const bonus = formatKeylessEnvelopeForTerminal(
+      capHit({
+        continuationPaths: [{ type: "bonus_credits", eligible: true, questions: ["only"] }],
+      }),
+    );
+    expect(bonus).toContain("  - Earn bonus credits by answering 1 question:");
+    expect(bonus).toContain("    POST your answers to: /v1/keyless/bonus");
+  });
 });

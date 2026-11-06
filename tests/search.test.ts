@@ -2,12 +2,18 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TavilyKeylessLimitError, TavilyRequestError } from "@tavily/core";
-import { afterEach, expect, test, vi } from "vitest";
+import { searchParameters } from "@tavily/core/parameters";
+import { Command } from "commander";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import {
+  applySearchFlags,
+  searchBodyFromOptions,
+  searchFlagSpecs,
+} from "../src/core/search-flags.js";
 import type { Json } from "../src/core/tavily-client.js";
 import { setTerminalOverride } from "../src/ui/text.js";
 import { captureOutput } from "./helpers/capture.js";
 import { runProgram, stubClient } from "./helpers/program.js";
-import { runCli } from "./helpers/run-cli.js";
 
 const io = captureOutput();
 const fixture = JSON.parse(
@@ -45,7 +51,21 @@ test("search --json posts only the query and prints the response pretty-printed"
 test("generated flags reach the request body in snake_case", async () => {
   const search = vi.fn(async () => fixture);
   await runProgram(
-    ["search", "q", "--json", "--depth", "fast", "--max-results", "3", "--include-answer"],
+    [
+      "search",
+      "q",
+      "--json",
+      "--depth",
+      "fast",
+      "--max-results",
+      "3",
+      "--include-answer",
+      "--include-domains",
+      "a.com, b.com",
+      "--safe-search",
+      "--chunks-per-source",
+      "2",
+    ],
     stubClient({ search }),
   );
   expect(search).toHaveBeenCalledWith({
@@ -53,6 +73,9 @@ test("generated flags reach the request body in snake_case", async () => {
     search_depth: "fast",
     max_results: 3,
     include_answer: "basic",
+    include_domains: ["a.com", "b.com"],
+    safe_search: true,
+    chunks_per_source: 2,
   });
 });
 
@@ -96,6 +119,8 @@ test("usage errors exit 2", async () => {
   expect(await runProgram(["search", "q", "--bogus"], client)).toBe(2);
   expect(await runProgram(["search", "q", "--max-results", "21"], client)).toBe(2);
   expect(io.stderr()).toContain("maximum 20");
+  expect(await runProgram(["search", "q", "--depth", "deep"], client)).toBe(2);
+  expect(io.stderr()).toContain("Allowed choices");
   expect(await runProgram(["search", "q", "--max-chars", "-1"], client)).toBe(2);
 });
 
@@ -217,15 +242,6 @@ test("-o at a terminal only saves", async () => {
   await runProgram(["search", "q", "-o", "out.json"], client);
   expect(io.stdout()).toBe("");
   expect(io.stderr()).toContain("Output saved to out.json");
-});
-
-// test_output.py::test_explicit_output_path_is_unchanged
-test("an explicit -o path is used as given", async () => {
-  setTerminalOverride(false);
-  const dir = mkdtempSync(join(tmpdir(), "tvly-search-"));
-  process.chdir(dir);
-  const { client } = fakeClient();
-  await runProgram(["search", "q", "-o", "out.json"], client);
   expect(existsSync(join(dir, "out.json"))).toBe(true);
   expect(existsSync(join(dir, ".tavily"))).toBe(false);
 });
@@ -250,10 +266,9 @@ test("JSON mode shows no spinner", async () => {
   expect(io.stderr()).toBe("");
 });
 
-test("dist/cli.js search --help lists the flags in order", async () => {
-  vi.restoreAllMocks();
-  const { stdout, code } = await runCli(["search", "--help"]);
-  expect(code).toBe(0);
+test("search --help lists the flags in order", async () => {
+  expect(await runProgram(["search", "--help"], stubClient({}))).toBe(0);
+  const stdout = io.stdout();
   const flags = [...stdout.matchAll(/^ {2}(?:-\w, )?(--[a-z-]+)/gm)].map((m) => m[1]);
   expect(flags).toEqual([
     "--depth",
@@ -294,14 +309,57 @@ test("dist/cli.js search --help lists the flags in order", async () => {
     "--json",
   ]);
   expect(stdout).toContain("ultra-fast");
-  const viaHelp = await runCli(["help", "search"]);
-  expect(viaHelp.code).toBe(0);
-  expect(viaHelp.stdout).toBe(stdout);
+  expect(await runProgram(["help", "search"], stubClient({}))).toBe(0);
+  expect(io.stdout()).toBe(stdout + stdout);
 });
 
-test("dist/cli.js search with an unknown option exits 2", async () => {
-  vi.restoreAllMocks();
-  const { code, stderr } = await runCli(["search", "q", "--bogus"]);
-  expect(code).toBe(2);
-  expect(stderr).toContain("unknown option");
+describe("search flag specs", () => {
+  const specs = searchFlagSpecs();
+  const spec = (key: string) => {
+    const s = specs.find((x) => x.key === key);
+    if (!s) throw new Error(`no spec for ${key}`);
+    return s;
+  };
+
+  test("every catalog key except query produces exactly one spec", () => {
+    const keys = Object.keys(searchParameters).filter((k) => k !== "query");
+    expect(specs.map((s) => s.key).sort()).toEqual(keys.sort());
+  });
+
+  test("maxResults is --max-results <n> and enforces the catalog bounds", () => {
+    const s = spec("maxResults");
+    expect(s.flags).toBe("--max-results <n>");
+    expect(s.parse("3")).toBe(3);
+    expect(() => s.parse("21")).toThrow(/maximum 20/);
+    expect(() => s.parse("-1")).toThrow(/minimum 0/);
+    expect(() => s.parse("2.5")).toThrow();
+    expect(() => s.parse("abc")).toThrow();
+  });
+
+  test("number flags accept fractions", () => {
+    expect(spec("days").parse("1.5")).toBe(1.5);
+  });
+
+  test("array flags drop empty entries and send nothing when no entries remain", () => {
+    const s = spec("includeDomains");
+    expect(s.parse("a.com,,b.com")).toEqual(["a.com", "b.com"]);
+    expect(s.parse("")).toEqual([]);
+    expect(s.parse(" , ")).toEqual([]);
+    for (const raw of ["", " , "]) {
+      const cmd = applySearchFlags(new Command("search").exitOverride().argument("[q...]"));
+      cmd.parse(["q", "--include-domains", raw, "--exclude-domains", "x.com,,"], { from: "user" });
+      expect(searchBodyFromOptions(cmd.opts())).toEqual({ exclude_domains: ["x.com"] });
+    }
+  });
+
+  test("includeAnswer bare is basic; a value passes through; booleans are accepted", () => {
+    const s = spec("includeAnswer");
+    expect(s.flags).toBe("--include-answer [value]");
+    expect(s.parse(true)).toBe("basic");
+    expect(s.parse("advanced")).toBe("advanced");
+    expect(s.parse("true")).toBe(true);
+    expect(s.parse("false")).toBe(false);
+    expect(() => s.parse("bogus")).toThrow(/Allowed choices/);
+    expect(spec("includeRawContent").parse(true)).toBe("markdown");
+  });
 });

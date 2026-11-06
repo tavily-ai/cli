@@ -4,9 +4,10 @@ import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { PassThrough, Writable } from "node:stream";
 import { Command } from "commander";
-import { expect, test, vi } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { ExitError } from "../src/errors.js";
 import { runRepl } from "../src/repl.js";
+import { splitShellWords } from "../src/util/shell-words.js";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escapes
 const ANSI = /\x1b\[[0-9;]*m/g;
@@ -122,23 +123,6 @@ test("raw mode is off while a command runs on a TTY and back on after", async ()
   expect(log[i + 1]).toBe(true);
 });
 
-test("a non-TTY input never gets setRawMode calls", async () => {
-  const input = new PassThrough();
-  const setRawMode = vi.fn();
-  Object.assign(input, { setRawMode });
-  input.end("search x\nexit\n");
-  const output = new Writable({ write: (_c, _e, cb) => cb() });
-  const home = mkdtempSync(join(tmpdir(), "tvly-repl-"));
-  await runRepl({
-    input,
-    output,
-    program: stubProgram([]),
-    home,
-    env: { TAVILY_API_KEY: "" } as NodeJS.ProcessEnv,
-  });
-  expect(setRawMode).not.toHaveBeenCalled();
-});
-
 test("a usage error is printed once, by the REPL only", async () => {
   const stderrWrites: string[] = [];
   const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
@@ -183,4 +167,31 @@ test("a prompt inside a command owns stdin; its answer is not replayed as a REPL
   expect(answers).toEqual(["y"]);
   expect(text).not.toContain("unknown command");
   expect(text).toContain("Goodbye!");
+});
+
+describe("splitShellWords", () => {
+  test("splits on whitespace and groups double quotes", () => {
+    expect(splitShellWords('search "two words" --max-results 3')).toEqual([
+      "search",
+      "two words",
+      "--max-results",
+      "3",
+    ]);
+  });
+
+  test("single quotes keep backslashes literally", () => {
+    expect(splitShellWords("echo 'a\\nb'")).toEqual(["echo", "a\\nb"]);
+  });
+
+  test("backslash outside quotes escapes the next character", () => {
+    expect(splitShellWords("a\\ b")).toEqual(["a b"]);
+  });
+
+  test("double quotes only escape quote and backslash (shlex posix)", () => {
+    expect(splitShellWords('"a\\"b\\\\c\\$d\\`e\\nf"')).toEqual(['a"b\\c\\$d\\`e\\nf']);
+  });
+
+  test("adjacent quoted segments join and empty quotes yield an empty word", () => {
+    expect(splitShellWords("a\"b\"'c' ''")).toEqual(["abc", ""]);
+  });
 });

@@ -14,7 +14,6 @@
   },
   "scripts": {
     "build": "tsup",
-    "pretest": "npm run build",
     "test": "vitest run",
     "lint": "biome check",
     "typecheck": "tsc --noEmit",

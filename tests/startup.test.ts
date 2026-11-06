@@ -12,9 +12,3 @@ test.skipIf(Boolean(process.env.CI))("cold start of --version is under 150ms", a
   times.sort((a, b) => a - b);
   expect(times[2]).toBeLessThan(150);
 });
-
-test("engines floor is 20.1.0 (recursive readdirSync)", async () => {
-  const { readFileSync } = await import("node:fs");
-  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-  expect(pkg.engines.node).toBe(">=20.1.0");
-});

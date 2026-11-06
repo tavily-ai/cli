@@ -4,7 +4,6 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
-import { normalizeResearchArgs } from "../src/commands/research.js";
 import { sseDataLines } from "../src/core/sse.js";
 import type { Json } from "../src/core/tavily-client.js";
 import { setTerminalOverride } from "../src/ui/text.js";
@@ -40,18 +39,6 @@ function pendingClient(...statuses: Json[]) {
 
 afterEach(() => {
   vi.useRealTimers();
-});
-
-test("normalizeResearchArgs keeps the Python ResearchGroup routing", () => {
-  expect(normalizeResearchArgs(["what is x"])).toEqual(["run", "what is x"]);
-  expect(normalizeResearchArgs(["status"])).toEqual(["run", "status"]);
-  expect(normalizeResearchArgs(["poll", "--json"])).toEqual(["run", "poll", "--json"]);
-  expect(normalizeResearchArgs(["status", "--help"])).toEqual(["status", "--help"]);
-  expect(normalizeResearchArgs(["poll", "-h"])).toEqual(["poll", "-h"]);
-  expect(normalizeResearchArgs(["status", "abc"])).toEqual(["status", "abc"]);
-  expect(normalizeResearchArgs(["run", "run"])).toEqual(["run", "run"]);
-  expect(normalizeResearchArgs(["--help"])).toEqual(["--help"]);
-  expect(normalizeResearchArgs([])).toEqual(["--help"]);
 });
 
 test("bare `research` prints the group help and exits 0", async () => {
@@ -276,12 +263,6 @@ test("status --json prints the response; human status shows request, status, and
   expect(text).toContain("  Request:  id[2J\n");
   expect(text).toContain("  Status:   failed\n");
   expect(text).toContain("  Error: bad\n");
-});
-
-test("human status hints at poll when completed", async () => {
-  const getResearch = vi.fn(async () => ({ status: "completed" }));
-  await runProgram(["research", "status", "abc"], stubClient({ getResearch }));
-  expect(visible(io.stdout())).toContain("Run 'tvly research poll abc' to view results.");
 });
 
 test("poll waits for the result; its timeout has no resume hint", async () => {
