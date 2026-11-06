@@ -108,8 +108,54 @@ test("crawl --output-dir writes one file per page with content and reports on st
   expect(readFileSync(join(dir, "a.example.md"), "utf8")).toBe(
     "# https://a.example/\n\nHome page text\n",
   );
-  expect(io.stderr()).toContain(`Saved 3 pages to ${dir}/`);
+  // The empty-content page is skipped and not counted.
+  expect(io.stderr()).toContain(`Saved 2 pages to ${dir}/`);
   expect(io.stdout()).toBe("");
+});
+
+test("crawl --output-dir still honours --json and -o", async () => {
+  const base = tmp();
+  const dir = join(base, "pages");
+  const file = join(base, "crawl.json");
+  const crawl = vi.fn(async () => crawlFixture);
+  await runProgram(
+    ["crawl", "https://a.example", "--output-dir", dir, "--json"],
+    stubClient({ crawl }),
+  );
+  expect(JSON.parse(io.stdout())).toEqual(crawlFixture);
+  expect(readdirSync(dir)).toHaveLength(2);
+
+  await runProgram(
+    ["crawl", "https://a.example", "--output-dir", dir, "-o", file],
+    stubClient({ crawl }),
+  );
+  expect(JSON.parse(readFileSync(file, "utf8"))).toEqual(crawlFixture);
+});
+
+test("crawl --output-dir gives colliding slugs distinct files", async () => {
+  const dir = join(tmp(), "pages");
+  const data = {
+    results: [
+      { url: "https://a.example/list?page=1", raw_content: "one" },
+      { url: "https://a.example/list?page=2", raw_content: "two" },
+      { url: "https://a.example/docs/a_b", raw_content: "three" },
+      { url: "https://a.example/docs/a:b", raw_content: "four" },
+      { url: "https://a.example/docs/a;b", raw_content: "five" },
+    ],
+  };
+  await runProgram(
+    ["crawl", "https://a.example", "--output-dir", dir],
+    stubClient({ crawl: async () => data }),
+  );
+  expect(readdirSync(dir).sort()).toEqual([
+    "a.example_docs_a_b-2.md",
+    "a.example_docs_a_b-3.md",
+    "a.example_docs_a_b.md",
+    "a.example_list_page_1.md",
+    "a.example_list_page_2.md",
+  ]);
+  expect(readFileSync(join(dir, "a.example_docs_a_b-3.md"), "utf8")).toContain("five");
+  expect(io.stderr()).toContain(`Saved 5 pages to ${dir}/`);
 });
 
 test("plain map output is the URLs joined by newlines", async () => {

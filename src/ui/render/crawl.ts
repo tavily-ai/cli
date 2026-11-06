@@ -4,30 +4,36 @@ import { isTerminal, sanitizeControl, tree } from "../text.js";
 import { colors, err, out } from "../theme.js";
 import { echoPages, emitIfRequested, footer, type Json, list, type Page } from "./emit.js";
 
-/** `<host><path>` with anything outside `[\w.-]` as `_`, e.g. `a.example_docs_intro`; `index` when empty. */
+/** `<host><path><query>` with anything outside `[\w.-]` as `_`, e.g. `a.example_docs_intro`; `index` when empty. */
 function slugOf(url: string): string {
   let location = url;
   try {
     const parsed = new URL(url);
-    location = parsed.host + parsed.pathname.replace(/\/+$/, "");
+    location = parsed.host + parsed.pathname.replace(/\/+$/, "") + parsed.search;
   } catch {
     // an unparseable URL slugs as its own text
   }
   return location.replace(/[^\p{L}\p{N}_\-.]/gu, "_").replace(/^_+|_+$/g, "") || "index";
 }
 
-/** Write each page that has content to `<dir>/<slug>.md` as `# <url>`, a blank line, and the content. */
+/**
+ * Write each page that has content to `<dir>/<slug>.md` as `# <url>`, a blank line, and the content.
+ * A slug already used in this run gets the first free `-2`, `-3`, ... suffix.
+ */
 export function saveCrawlToDir(data: Json, dir: string): void {
   mkdirSync(dir, { recursive: true });
-  const pages = list<Page>(data.results);
-  for (const page of pages) {
+  const used = new Set<string>();
+  for (const page of list<Page>(data.results)) {
     if (!page.raw_content) continue;
-    writeFileSync(
-      path.join(dir, `${slugOf(page.url ?? "")}.md`),
-      `# ${page.url ?? ""}\n\n${page.raw_content}\n`,
-    );
+    const url = page.url ?? "";
+    const slug = slugOf(url);
+    let name = slug;
+    // Lower-cased so case-insensitive filesystems cannot collide either.
+    for (let n = 2; used.has(name.toLowerCase()); n++) name = `${slug}-${n}`;
+    used.add(name.toLowerCase());
+    writeFileSync(path.join(dir, `${name}.md`), `# ${url}\n\n${page.raw_content}\n`);
   }
-  err(`Saved ${pages.length} pages to ${dir}/`);
+  err(`Saved ${used.size} pages to ${dir}/`);
 }
 
 export function printCrawlResults(
@@ -36,6 +42,7 @@ export function printCrawlResults(
 ): void {
   if (opts.outputDir) {
     saveCrawlToDir(data, opts.outputDir);
+    emitIfRequested(data, opts);
     return;
   }
   if (emitIfRequested(data, opts)) return;

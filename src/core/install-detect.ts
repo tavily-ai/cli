@@ -96,7 +96,7 @@ function managerOutput(manager: string, args: string[], deps: ManagerDeps): stri
   try {
     const r = (deps.spawnSync ?? childProcess.spawnSync)(win ? `"${bin}"` : bin, args, {
       encoding: "utf8",
-      timeout: 2000,
+      timeout: 15_000,
       windowsHide: true,
       shell: win,
     });

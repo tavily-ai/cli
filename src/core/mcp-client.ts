@@ -21,8 +21,14 @@ function isObject(value: unknown): value is Json {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function raiseIfApiError(parsed: unknown): void {
+/**
+ * Throw for an API error payload. A payload with a string `status` is a task result (e.g. a failed
+ * research task, `{status: "failed", error}`) and is returned like the API-key path does, unless
+ * MCP flagged the result with `isError`.
+ */
+function raiseIfApiError(parsed: unknown, isError: boolean): void {
   if (!isObject(parsed) || !("error" in parsed)) return;
+  if (!isError && typeof parsed.status === "string") return;
   const detail = parsed.detail;
   const message =
     isObject(detail) && typeof detail.error === "string" ? detail.error : String(parsed.error);
@@ -61,10 +67,18 @@ function parseJson(text: string): unknown {
 function unwrapResult(data: Json): Json {
   if ("error" in data) throw rpcError(data.error);
   const result = isObject(data.result) ? data.result : {};
+  const isError = result.isError === true;
   const structured = result.structuredContent;
   if (structured && (typeof structured === "object" || typeof structured === "string")) {
-    const parsed = typeof structured === "string" ? JSON.parse(structured) : structured;
-    raiseIfApiError(parsed);
+    const parsed = typeof structured === "string" ? parseJson(structured) : structured;
+    if (parsed === undefined) {
+      throw new TavilyRequestError({
+        status: 0,
+        body: structured,
+        message: "The Tavily MCP server returned malformed structuredContent (not valid JSON).",
+      });
+    }
+    raiseIfApiError(parsed, isError);
     return parsed as Json;
   }
   const content = result.content;
@@ -73,7 +87,7 @@ function unwrapResult(data: Json): Json {
     const textVal = isObject(first) && typeof first.text === "string" ? first.text : "";
     const parsed = parseJson(textVal);
     if (parsed === undefined) return { raw: textVal };
-    raiseIfApiError(parsed);
+    raiseIfApiError(parsed, isError);
     return parsed as Json;
   }
   return result;
@@ -127,7 +141,17 @@ export function createMcpClient(opts: McpClientOptions): TavilyClientLike {
     }
 
     const payload = await firstDataLine(text);
-    if (payload !== undefined) return unwrapResult(JSON.parse(payload) as Json);
+    if (payload !== undefined) {
+      const message = parseJson(payload);
+      if (!isObject(message)) {
+        throw new TavilyRequestError({
+          status: 0,
+          body: payload,
+          message: "The Tavily MCP server returned a malformed SSE message (not a JSON object).",
+        });
+      }
+      return unwrapResult(message);
+    }
 
     // No SSE data lines: the whole body may be plain JSON.
     const data = parseJson(text);

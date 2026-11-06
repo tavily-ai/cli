@@ -1,6 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { PassThrough, Writable } from "node:stream";
 import { Command } from "commander";
 import { expect, test, vi } from "vitest";
@@ -152,4 +153,34 @@ test("a usage error is printed once, by the REPL only", async () => {
   } finally {
     spy.mockRestore();
   }
+});
+
+test("a prompt inside a command owns stdin; its answer is not replayed as a REPL command", async () => {
+  const input = new PassThrough();
+  let text = "";
+  const output = new Writable({
+    write(chunk, _enc, cb) {
+      text += chunk.toString();
+      cb();
+    },
+  });
+  const answers: string[] = [];
+  const program = () => {
+    const p = new Command().exitOverride();
+    p.command("ask").action(async () => {
+      const nested = createInterface({ input, output, terminal: false });
+      const answer = nested.question("Continue? ");
+      input.write("y\n");
+      answers.push(await answer);
+      nested.close();
+      input.write("exit\n");
+    });
+    return p;
+  };
+  input.write("ask\n");
+  const home = mkdtempSync(join(tmpdir(), "tvly-repl-"));
+  await runRepl({ input, output, program, home, env: { TAVILY_API_KEY: "" } as NodeJS.ProcessEnv });
+  expect(answers).toEqual(["y"]);
+  expect(text).not.toContain("unknown command");
+  expect(text).toContain("Goodbye!");
 });

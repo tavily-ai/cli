@@ -18,7 +18,8 @@
     "test": "vitest run",
     "lint": "biome check",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run build"
+    "check:publishable": "node -e \"const s=require('./package.json').dependencies['@tavily/core'];if(!/^[~^0-9]/.test(s)){console.error('@tavily/core is '+s+'; switch it to a registry semver range before publishing (a file: dependency makes the package uninstallable).');process.exit(1)}\"",
+    "prepublishOnly": "npm run check:publishable && npm run lint && npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
     "@tavily/core": "file:vendor/tavily-core-1.1.0.tgz",

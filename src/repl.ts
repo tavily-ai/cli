@@ -102,32 +102,43 @@ export async function runRepl(opts: ReplOptions = {}): Promise<void> {
   say();
   await printBanner(say, opts);
 
-  const rl = createInterface({
-    input,
-    output,
-    terminal: input.isTTY === true,
-    historySize: 100,
-  });
-  rl.setPrompt(colorEnabled() ? PROMPT : "❯  ");
-
   // Lines are queued so input that arrives while a command runs (or is piped in) is not lost.
   const queue: string[] = [];
   let closed = false;
+  let detaching = false;
   let interrupted = false;
+  let history: string[] = [];
   let wake: (() => void) | undefined;
   const notify = () => wake?.();
-  rl.on("line", (l) => {
-    queue.push(l);
-    notify();
-  });
-  rl.on("close", () => {
-    closed = true;
-    notify();
-  });
-  rl.on("SIGINT", () => {
-    interrupted = true;
-    notify();
-  });
+
+  const open = () => {
+    const rl = createInterface({
+      input,
+      output,
+      terminal: input.isTTY === true,
+      history,
+      historySize: 100,
+    });
+    rl.setPrompt(colorEnabled() ? PROMPT : "❯  ");
+    rl.on("history", (h) => {
+      history = h;
+    });
+    rl.on("line", (l) => {
+      queue.push(l);
+      notify();
+    });
+    rl.on("close", () => {
+      if (detaching) return;
+      closed = true;
+      notify();
+    });
+    rl.on("SIGINT", () => {
+      interrupted = true;
+      notify();
+    });
+    return rl;
+  };
+  let rl = open();
 
   const nextLine = async (): Promise<string | null> => {
     const width = output.columns ?? 80;
@@ -175,10 +186,13 @@ export async function runRepl(opts: ReplOptions = {}): Promise<void> {
       if (args.length === 0) continue;
 
       say();
-      if (!closed) rl.pause();
-      // Raw mode swallows Ctrl+C; restore cooked mode so a running command can be interrupted.
-      const rawCapable = input.isTTY === true && typeof input.setRawMode === "function";
-      if (rawCapable) input.setRawMode?.(false);
+      // Detach fully (pause() keeps the listeners) so a prompt inside the command owns stdin;
+      // closing also restores cooked mode so Ctrl+C can interrupt the command.
+      if (!closed) {
+        detaching = true;
+        rl.close();
+        detaching = false;
+      }
       try {
         const program = makeProgram();
         silenceErrors(program);
@@ -194,10 +208,8 @@ export async function runRepl(opts: ReplOptions = {}): Promise<void> {
           );
         }
       } finally {
-        if (!closed) {
-          if (rawCapable) input.setRawMode?.(true);
-          rl.resume();
-        }
+        if ((input as { readableEnded?: boolean }).readableEnded) closed = true;
+        if (!closed) rl = open();
       }
       say();
     }

@@ -75,7 +75,7 @@ async function connect(
 
 /**
  * Poll until the task completes or fails; undefined on timeout. JSON mode sleeps `pollInterval`
- * seconds between checks; human mode ticks every second with an elapsed-time spinner. The spinner
+ * seconds (at least 1) between checks; human mode ticks every second with an elapsed-time spinner. The spinner
  * stops before any API error propagates to the caller's `runWithApiErrors`.
  */
 async function waitForResult(
@@ -84,16 +84,16 @@ async function waitForResult(
   opts: { json: boolean; pollInterval: number; timeout: number; label: string },
   sleep: (ms: number) => Promise<void>,
 ): Promise<Json | undefined> {
-  let elapsed = 0;
   if (opts.json) {
-    while (elapsed < opts.timeout) {
+    const deadline = Date.now() + opts.timeout * 1000;
+    while (Date.now() < deadline) {
       const response = await client.getResearch(requestId);
       if (isDone(response)) return response;
-      await sleep(opts.pollInterval * 1000);
-      elapsed += opts.pollInterval;
+      await sleep(Math.max(1, opts.pollInterval) * 1000);
     }
     return undefined;
   }
+  let elapsed = 0;
   const message = () => colors.aqua(`${opts.label}... ${elapsed}s elapsed`);
   const live = spinner(message(), { enabled: true });
   try {
