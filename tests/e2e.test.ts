@@ -20,8 +20,8 @@ let server: Awaited<ReturnType<typeof startFixtureServer>>;
 beforeAll(async () => {
   server = await startFixtureServer({
     "POST /search": searchResponse,
-    // A JSON (not SSE) JSON-RPC reply; mcp-client.test.ts covers the SSE and structuredContent shapes.
-    "POST /mcp": { jsonrpc: "2.0", id: 1, result: searchResponse },
+    // A plain-JSON (not SSE) JSON-RPC reply; mcp-client.test.ts covers the SSE shapes.
+    "POST /mcp": { jsonrpc: "2.0", id: 1, result: { structuredContent: searchResponse } },
   });
 });
 afterAll(() => server.close());
