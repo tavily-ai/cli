@@ -129,6 +129,14 @@ test("isError raises even when the payload carries a string status", async () =>
   expect(err).toMatchObject({ message: "nope" });
 });
 
+test("a malformed SSE data line throws TavilyRequestError, not SyntaxError", async () => {
+  const err = await make("event: message\ndata: {not json\n\n")
+    .c.search({})
+    .catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(TavilyRequestError);
+  expect((err as Error).message).toContain("malformed SSE message");
+});
+
 test("malformed structuredContent throws TavilyRequestError, not SyntaxError", async () => {
   const err = await make(sse({ result: { structuredContent: "{not json" } }))
     .c.search({})

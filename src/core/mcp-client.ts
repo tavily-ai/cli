@@ -141,7 +141,17 @@ export function createMcpClient(opts: McpClientOptions): TavilyClientLike {
     }
 
     const payload = await firstDataLine(text);
-    if (payload !== undefined) return unwrapResult(JSON.parse(payload) as Json);
+    if (payload !== undefined) {
+      const message = parseJson(payload);
+      if (!isObject(message)) {
+        throw new TavilyRequestError({
+          status: 0,
+          body: payload,
+          message: "The Tavily MCP server returned a malformed SSE message (not a JSON object).",
+        });
+      }
+      return unwrapResult(message);
+    }
 
     // No SSE data lines: the whole body may be plain JSON.
     const data = parseJson(text);
