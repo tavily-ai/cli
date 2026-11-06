@@ -6,10 +6,9 @@ import path from "node:path";
 import type { Command } from "commander";
 import { getClientOrKeyless } from "../core/client-factory.js";
 import {
+  authMethod,
   type ConfigOptions,
   getApiKey,
-  hasStoredOauth,
-  isOauthToken,
   saveApiKey,
   saveOauthSession,
 } from "../core/config.js";
@@ -264,14 +263,9 @@ async function ensureAuth(
   opts: InitOptions,
   deps: InitDeps,
 ): Promise<{ authenticated: boolean; method: string }> {
-  const config: ConfigOptions = {
-    ...(deps.home !== undefined ? { home: deps.home } : {}),
-    ...(deps.env !== undefined ? { env: deps.env } : {}),
-    ...(deps.fetchImpl !== undefined ? { fetchImpl: deps.fetchImpl } : {}),
-  };
-  if (opts.apiKey) await saveApiKey(opts.apiKey, config);
-  const key = await getApiKey(config);
-  if (key) return { authenticated: true, method: authMethod(key, config) };
+  if (opts.apiKey) await saveApiKey(opts.apiKey, deps);
+  const key = await getApiKey(deps);
+  if (key) return { authenticated: true, method: authMethod(key, deps) };
   if (opts.skipAuth) return { authenticated: false, method: "none" };
 
   const isTTY = deps.stdinIsTTY ?? process.stdin.isTTY === true;
@@ -288,14 +282,8 @@ async function ensureAuth(
     ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
     ...(deps.openImpl ? { openImpl: deps.openImpl } : {}),
   });
-  await saveOauthSession(session, config);
+  await saveOauthSession(session, deps);
   return { authenticated: true, method: "oauth" };
-}
-
-function authMethod(key: string, config: ConfigOptions): string {
-  if ((config.env ?? process.env).TAVILY_API_KEY) return "env";
-  if (isOauthToken(key)) return hasStoredOauth(config) ? "oauth" : "oauth_legacy";
-  return "api_key";
 }
 
 async function verifyLiveSearch(deps: InitDeps): Promise<boolean> {

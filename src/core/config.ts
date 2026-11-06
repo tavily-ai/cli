@@ -149,10 +149,6 @@ function withoutKeys(config: Config, ...keys: string[]): Config {
   return copy;
 }
 
-function withRefreshedSession(config: Config, session: OAuthSession): Config {
-  return { ...withoutKeys(config, "api_key"), oauth: oauthSessionData(session) };
-}
-
 /** Replace stored credentials with an API key, revoking old OAuth first (best effort). */
 export async function saveApiKey(apiKey: string, opts: ConfigOptions = {}): Promise<void> {
   await withConfigLock(async (config) => {
@@ -196,17 +192,6 @@ export async function saveOauthSession(
     }
     return { config: { ...withoutKeys(config, "api_key"), oauth: replacement }, result: undefined };
   }, opts);
-}
-
-/** Persist refreshed tokens for the active session without revoking it. */
-export async function saveRefreshedOauthSession(
-  session: OAuthSession,
-  opts: ConfigOptions = {},
-): Promise<void> {
-  await withConfigLock(
-    async (config) => ({ config: withRefreshedSession(config, session), result: undefined }),
-    opts,
-  );
 }
 
 /** True when ~/.tavily/config.json holds a native OAuth session. */
@@ -380,7 +365,9 @@ async function oauthAccessToken(config: Config, opts: ConfigOptions): Promise<st
       refresh,
       opts.fetchImpl,
     );
-    await writeConfigUnlocked(withRefreshedSession(config, { tokens, client }), opts);
+    // The refreshed session replaces the stored one without revoking it.
+    const oauth = oauthSessionData({ tokens, client });
+    await writeConfigUnlocked({ ...withoutKeys(config, "api_key"), oauth }, opts);
     return tokens.accessToken;
   } catch (e) {
     throw new OAuthError(
@@ -415,6 +402,16 @@ export async function getApiKey(opts: ConfigOptions = {}): Promise<string | null
 /** True for an MCP OAuth JWT (as opposed to a tvly-* API key). */
 export function isOauthToken(key: string): boolean {
   return !key.startsWith("tvly-") && decodeJwtPayload(key) !== null;
+}
+
+/** How `key`, as `getApiKey` resolved it, was found. */
+export function authMethod(
+  key: string,
+  opts: ConfigOptions = {},
+): "env" | "oauth" | "oauth_legacy" | "api_key" {
+  if ((opts.env ?? process.env).TAVILY_API_KEY) return "env";
+  if (isOauthToken(key)) return hasStoredOauth(opts) ? "oauth" : "oauth_legacy";
+  return "api_key";
 }
 
 /** Describe how the user is authenticated. */

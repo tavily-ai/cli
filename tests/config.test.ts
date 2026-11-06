@@ -27,7 +27,6 @@ import {
   revokeStoredOauth,
   saveApiKey,
   saveOauthSession,
-  saveRefreshedOauthSession,
   withConfigLock,
 } from "../src/core/config.js";
 import { expiresAtFromNow, type OAuthSession } from "../src/core/oauth.js";
@@ -279,6 +278,8 @@ test("save oauth session reports when the replacement cleanup also fails", async
 
 test("malformed expiry refreshes without revoking active session", async () => {
   await writeConfig({
+    api_key: "",
+    human_id: "h",
     oauth: {
       access_token: "old-access",
       refresh_token: "same-refresh",
@@ -305,6 +306,9 @@ test("malformed expiry refreshes without revoking active session", async () => {
   expect(stored.refresh_token).toBe("same-refresh");
   expect(stored.client_id).toBe("same-client");
   expect(server.revoked()).toEqual([]);
+  // The rewrite drops the (empty) api_key and keeps unrelated fields.
+  expect(readConfig(opts)).not.toHaveProperty("api_key");
+  expect(readConfig(opts).human_id).toBe("h");
 });
 
 test("malformed expiry without refresh is invalid", async () => {
@@ -472,26 +476,6 @@ test("getApiKey with an unwritable HOME and no env key resolves keyless instead 
   const fileHome = path.join(home, "not-a-dir");
   writeFileSync(fileHome, "");
   expect(await getApiKey({ home: fileHome, env: {} })).toBeNull();
-});
-
-test("saving a refreshed session never revokes and drops api_key", async () => {
-  await writeConfig({ api_key: "tvly-x", human_id: "h", oauth: previousOauth });
-  const server = fakeServer();
-  await saveRefreshedOauthSession(replacementSession, { ...opts, fetchImpl: server.fetchImpl });
-  expect(server.calls).toEqual([]);
-  expect(readConfig(opts)).toEqual({
-    human_id: "h",
-    oauth: {
-      access_token: "new-access",
-      refresh_token: "new-refresh",
-      expires_at: replacementSession.tokens.expiresAt,
-      token_type: "Bearer",
-      client_id: "new-client",
-      client_secret: null,
-      token_endpoint_auth_method: "none",
-      redirect_uri: "http://127.0.0.1:2/callback",
-    },
-  });
 });
 
 test("reading a Python-written config returns its unexpired access token", async () => {

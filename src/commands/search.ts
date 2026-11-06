@@ -5,18 +5,12 @@ import { getClientOrKeyless } from "../core/client-factory.js";
 import { applySearchFlags, searchBodyFromOptions } from "../core/search-flags.js";
 import type { Json } from "../core/tavily-client.js";
 import { ExitError, messageOf } from "../errors.js";
+import { keylessCapError, printKeylessCapHit } from "../ui/keyless.js";
 import { resolveOutput } from "../ui/render/emit.js";
 import { printMultiSearchResults, printSearchResults } from "../ui/render/search.js";
 import { withSpinner } from "../ui/spinner.js";
 import { addCommonOptions, parseNumberArg, resolveJson } from "./options.js";
-import {
-  keylessCapError,
-  LIMIT_STATUSES,
-  printKeylessCapHit,
-  QUERY_REQUIRED,
-  readQueryArg,
-  runWithApiErrors,
-} from "./shared.js";
+import { LIMIT_STATUSES, QUERY_REQUIRED, readQueryArg, runWithApiErrors } from "./shared.js";
 
 const MAX_QUERIES = 5;
 const DEFAULT_CHARS = 600;

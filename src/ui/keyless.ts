@@ -1,5 +1,8 @@
 /** Terminal rendering for the Tavily API's keyless rate-limit envelope. */
+import type { TavilyKeylessLimitError } from "@tavily/core";
 import { isObject } from "../errors.js";
+import { sanitizeControl } from "./text.js";
+import { colors, err } from "./theme.js";
 
 /** Compact human duration for retry-after hints. */
 export function formatSeconds(seconds: number): string {
@@ -24,22 +27,48 @@ type Action = Record<string, unknown>;
 /** Python truthiness for the `or` defaults the envelope fields use. */
 const orDefault = (value: unknown, fallback: string): string => (value ? String(value) : fallback);
 
+/** The `--json` error object for a keyless cap hit. */
+export function keylessCapError(e: TavilyKeylessLimitError) {
+  return {
+    code: e.capType,
+    message: e.message,
+    window: e.window,
+    retry_after_seconds: e.retryAfter,
+    next_actions: e.continuationPaths,
+  };
+}
+
+/** Print the keyless cap-hit message, retry delay, continuation options and login hint to stderr. */
+export function printKeylessCapHit(e: TavilyKeylessLimitError): void {
+  err();
+  sanitizeControl(formatKeylessEnvelopeForTerminal(e))
+    .split("\n")
+    .forEach((line, i) => {
+      if (i === 0) err(`  ${colors.yellow(">")} ${colors.bold(line)}`);
+      else err(line ? `    ${line}` : "");
+    });
+  err();
+  err(
+    `  ${colors.dim("Run ")}${colors.green("tvly login")}${colors.dim(" to authenticate and remove this cap.")}`,
+  );
+  err();
+}
+
 /** Render the keyless rate-limit envelope as a plain-text block (first line is the title). */
-export function formatKeylessEnvelopeForTerminal(opts: {
-  message?: string;
-  retryAfterSeconds?: number | null;
-  nextActions?: unknown[];
-}): string {
+export function formatKeylessEnvelopeForTerminal(
+  e: Pick<TavilyKeylessLimitError, "message" | "retryAfter" | "continuationPaths">,
+): string {
   const lines = ["Tavily rate limit reached."];
 
-  if (typeof opts.message === "string" && opts.message.trim()) lines.push(opts.message.trim());
+  if (e.message.trim()) lines.push(e.message.trim());
 
-  const retry = opts.retryAfterSeconds;
+  const retry = e.retryAfter;
   if (typeof retry === "number" && Number.isInteger(retry) && retry > 0) {
     lines.push("", `Retry after: ${formatSeconds(retry)} (${retry}s)`);
   }
 
-  const actions = (opts.nextActions ?? []).filter(isObject);
+  // The SDK passes the envelope's entries through unchecked, so non-objects are skipped.
+  const actions = (e.continuationPaths as unknown[]).filter(isObject);
   const last = (type: string, accept: (a: Action) => boolean = () => true) =>
     [...actions].reverse().find((a) => a.type === type && accept(a));
   const signup = last("signup");

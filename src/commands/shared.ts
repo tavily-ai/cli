@@ -4,50 +4,13 @@ import { TavilyKeylessLimitError, TavilyRequestError } from "@tavily/core";
 import type { Command } from "commander";
 import { snake } from "../core/search-flags.js";
 import { ExitError, messageOf, OAuthError } from "../errors.js";
-import { formatKeylessEnvelopeForTerminal } from "../ui/keyless.js";
+import { keylessCapError, printKeylessCapHit } from "../ui/keyless.js";
 import { safeLink, sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
 import { handleOauthRefreshError } from "./common.js";
 
 // Status codes that represent usage/plan limits rather than real errors.
 export const LIMIT_STATUSES: ReadonlySet<number> = new Set([429, 432]);
-
-export function keylessCapError(e: TavilyKeylessLimitError) {
-  return {
-    code: e.capType,
-    message: e.message,
-    window: e.window,
-    retry_after_seconds: e.retryAfter,
-    next_actions: e.continuationPaths,
-  };
-}
-
-/** Print the keyless cap-hit message, retry delay, continuation options and login hint to stderr. */
-export function printKeylessCapHit(e: TavilyKeylessLimitError): void {
-  const block = formatKeylessEnvelopeForTerminal({
-    message: e.message,
-    retryAfterSeconds: e.retryAfter,
-    nextActions: e.continuationPaths,
-  });
-  err();
-  sanitizeControl(block)
-    .split("\n")
-    .forEach((line, i) => {
-      if (i === 0) err(`  ${colors.yellow(">")} ${colors.bold(line)}`);
-      else err(line ? `    ${line}` : "");
-    });
-  err();
-  err(
-    `  ${colors.dim("Run ")}${colors.green("tvly login")}${colors.dim(" to authenticate and remove this cap.")}`,
-  );
-  err();
-}
-
-export function handleKeylessCapHit(e: TavilyKeylessLimitError, json: boolean): never {
-  if (json) out(JSON.stringify({ error: keylessCapError(e) }));
-  else printKeylessCapHit(e);
-  throw new ExitError(3);
-}
 
 export function handleApiError(e: unknown, json: boolean): never {
   const limit = e instanceof TavilyRequestError && LIMIT_STATUSES.has(e.status);
@@ -77,7 +40,11 @@ export async function runWithApiErrors<T>(json: boolean, fn: () => Promise<T>): 
     return await fn();
   } catch (e) {
     if (e instanceof ExitError) throw e;
-    if (e instanceof TavilyKeylessLimitError) return handleKeylessCapHit(e, json);
+    if (e instanceof TavilyKeylessLimitError) {
+      if (json) out(JSON.stringify({ error: keylessCapError(e) }));
+      else printKeylessCapHit(e);
+      throw new ExitError(3);
+    }
     if (e instanceof OAuthError) return handleOauthRefreshError(e, json);
     return handleApiError(e, json);
   }

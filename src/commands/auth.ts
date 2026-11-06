@@ -1,13 +1,11 @@
 /** tvly login, logout, auth — manage stored Tavily credentials. */
-import { existsSync } from "node:fs";
 import type { Command } from "commander";
 import {
+  authMethod,
   type ConfigOptions,
   clearCredentials,
   configPaths,
   getApiKey,
-  hasStoredOauth,
-  isOauthToken,
   saveApiKey,
   saveOauthSession,
 } from "../core/config.js";
@@ -33,23 +31,16 @@ const ENV_CREDENTIAL_WARNING =
   "TAVILY_API_KEY is still set and cannot be removed from the parent environment by this process. " +
   "Run: unset TAVILY_API_KEY";
 
-const configOptions = (deps: AuthDeps): ConfigOptions => ({
-  ...(deps.home !== undefined ? { home: deps.home } : {}),
-  ...(deps.env !== undefined ? { env: deps.env } : {}),
-  ...(deps.fetchImpl !== undefined ? { fetchImpl: deps.fetchImpl } : {}),
-});
-
 export async function runLogin(
   opts: LoginOptions,
   cmd: Command,
   deps: AuthDeps = {},
 ): Promise<void> {
   const json = resolveJson(cmd);
-  const config = configOptions(deps);
   const configFile = configPaths(deps.home).file;
 
   if (opts.apiKey) {
-    await saveApiKey(opts.apiKey, config);
+    await saveApiKey(opts.apiKey, deps);
     printLoginSuccess("API key", `Saved to ${configFile}`, json);
     return;
   }
@@ -99,7 +90,7 @@ export async function runLogin(
       ...(deps.openImpl ? { openImpl: deps.openImpl } : {}),
     });
     spin.stop();
-    await saveOauthSession(session, config);
+    await saveOauthSession(session, deps);
   } catch (e) {
     spin.stop();
     if (e instanceof OAuthError) failLogin(e.message, json);
@@ -151,26 +142,18 @@ function failLogin(message: string, json: boolean): never {
   throw new ExitError(3);
 }
 
-type Method = "env" | "oauth" | "oauth_legacy" | "api_key";
-
 /** The effective credential and where it came from. */
-function effectiveAuthState(
-  key: string | null,
-  deps: AuthDeps,
-): { key: string | null; method: Method | null; source: string | null } {
-  const config = configOptions(deps);
+function effectiveAuthState(key: string | null, deps: AuthDeps) {
   if (!key) return { key: null, method: null, source: null };
+  const method = authMethod(key, deps);
   const { file } = configPaths(deps.home);
-  if ((deps.env ?? process.env).TAVILY_API_KEY) {
-    return { key, method: "env", source: "TAVILY_API_KEY environment variable" };
-  }
-  if (isOauthToken(key)) {
-    return hasStoredOauth(config)
-      ? { key, method: "oauth", source: `OAuth (${file})` }
-      : { key, method: "oauth_legacy", source: "OAuth (~/.mcp-auth/)" };
-  }
-  if (existsSync(file)) return { key, method: "api_key", source: `config file (${file})` };
-  return { key, method: null, source: null };
+  const source = {
+    env: "TAVILY_API_KEY environment variable",
+    oauth: `OAuth (${file})`,
+    oauth_legacy: "OAuth (~/.mcp-auth/)",
+    api_key: `config file (${file})`,
+  }[method];
+  return { key, method, source };
 }
 
 export async function runLogout(
@@ -179,8 +162,8 @@ export async function runLogout(
   deps: AuthDeps = {},
 ): Promise<void> {
   const json = resolveJson(cmd);
-  const result = await clearCredentials(configOptions(deps));
-  const { key, method, source } = effectiveAuthState(await getApiKey(configOptions(deps)), deps);
+  const result = await clearCredentials(deps);
+  const { key, method, source } = effectiveAuthState(await getApiKey(deps), deps);
   const envPresent = method === "env";
   const payload: Record<string, unknown> = {
     authenticated: key !== null,
@@ -231,10 +214,7 @@ export async function runAuth(
   deps: AuthDeps = {},
 ): Promise<void> {
   const json = resolveJson(cmd);
-  const { key, method, source } = effectiveAuthState(
-    await getApiKeyOrExit(json, configOptions(deps)),
-    deps,
-  );
+  const { key, method, source } = effectiveAuthState(await getApiKeyOrExit(json, deps), deps);
   if (json) {
     out(JSON.stringify({ authenticated: key !== null, method, source }));
     return;

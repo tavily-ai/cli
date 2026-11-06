@@ -5,15 +5,13 @@ import { handleOauthRefreshError } from "../src/commands/common.js";
 import { addClientNameOption, addOutputOption, resolveJson } from "../src/commands/options.js";
 import {
   handleApiError,
-  handleKeylessCapHit,
-  keylessCapError,
-  printKeylessCapHit,
   readQueryArg,
   runWithApiErrors,
   splitCsv,
 } from "../src/commands/shared.js";
 import { authSource } from "../src/core/config.js";
 import { ExitError, OAuthError } from "../src/errors.js";
+import { keylessCapError, printKeylessCapHit } from "../src/ui/keyless.js";
 import { resolveOutput } from "../src/ui/render/emit.js";
 
 const ANSI = new RegExp(
@@ -116,10 +114,14 @@ test("keylessCapError maps SDK fields, including window, in the Python key order
   });
 });
 
-test("handleKeylessCapHit JSON and human modes exit 3", () => {
-  expect(exitCode(() => handleKeylessCapHit(capError(), true))).toBe(3);
+test("a keyless cap hit in runWithApiErrors exits 3 in JSON and human modes", async () => {
+  const hit = (json: boolean) =>
+    runWithApiErrors(json, async () => {
+      throw capError();
+    }).catch((e: ExitError) => e.code);
+  expect(await hit(true)).toBe(3);
   expect(JSON.parse(stdout.join(""))).toEqual({ error: keylessCapError(capError()) });
-  expect(exitCode(() => handleKeylessCapHit(capError(), false))).toBe(3);
+  expect(await hit(false)).toBe(3);
   const text = strip(stderr.join(""));
   expect(text).toContain("  > Tavily rate limit reached.");
   expect(text).toContain("    Retry after: 1h (3600s)");
