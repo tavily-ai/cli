@@ -24,11 +24,29 @@ export interface DetectOptions {
   which?: (name: string) => string | null;
 }
 
-const MANAGER_COMMANDS: Record<"npm" | "pnpm" | "yarn" | "bun", string[]> = {
+export type GlobalManager = "npm" | "pnpm" | "yarn" | "bun";
+
+export const MANAGER_COMMANDS: Record<GlobalManager, string[]> = {
   npm: ["npm", "install", "-g", PACKAGE_SPEC],
   pnpm: ["pnpm", "add", "-g", PACKAGE_SPEC],
   yarn: ["yarn", "global", "add", PACKAGE_SPEC],
   bun: ["bun", "add", "-g", PACKAGE_SPEC],
+};
+
+/** How to run the CLI without a global install, per package manager. */
+export const MANAGER_RUNNERS: Record<GlobalManager, string> = {
+  npm: "npx @tavily/cli",
+  pnpm: "pnpm dlx @tavily/cli",
+  yarn: "yarn dlx @tavily/cli",
+  bun: "bunx @tavily/cli",
+};
+
+/** The command that prints each manager's global bin directory (npm prints its prefix). */
+const BIN_COMMANDS: Record<GlobalManager, string[]> = {
+  npm: ["prefix", "-g"],
+  pnpm: ["bin", "-g"],
+  yarn: ["global", "bin"],
+  bun: ["pm", "bin", "-g"],
 };
 
 const SOURCE_REASON =
@@ -48,20 +66,35 @@ const blocked = (method: InstallMethod, reason: string): InstallInfo => ({
   blockedReason: reason,
 });
 
-/**
- * Run `npm root -g` through npm's resolved PATH entry. Windows needs `shell: true` for the .cmd
- * shim, and a bare name there would also find an `npm.cmd` planted in the current directory.
- */
-export function npmRootGlobalDefault(deps: {
+interface ManagerDeps {
   which: (name: string) => string | null;
   spawnSync?: typeof childProcess.spawnSync;
   platform?: NodeJS.Platform;
-}): string | null {
-  const npm = deps.which("npm");
-  if (!npm) return null;
+}
+
+/** Run `npm root -g` through npm's resolved PATH entry. */
+export function npmRootGlobalDefault(deps: ManagerDeps): string | null {
+  return managerOutput("npm", ["root", "-g"], deps);
+}
+
+/** The manager's global bin directory, where `tvly` lands after a global install. */
+export function globalBinDir(manager: GlobalManager, deps: ManagerDeps): string | null {
+  const out = managerOutput(manager, BIN_COMMANDS[manager], deps);
+  if (!out) return null;
+  return manager === "npm" && (deps.platform ?? process.platform) !== "win32" ? `${out}/bin` : out;
+}
+
+/**
+ * Run a package manager through its resolved PATH entry and return trimmed stdout. Windows needs
+ * `shell: true` for the .cmd shim, and a bare name there would also find a planted `npm.cmd` in
+ * the current directory.
+ */
+function managerOutput(manager: string, args: string[], deps: ManagerDeps): string | null {
+  const bin = deps.which(manager);
+  if (!bin) return null;
   const win = (deps.platform ?? process.platform) === "win32";
   try {
-    const r = (deps.spawnSync ?? childProcess.spawnSync)(win ? `"${npm}"` : npm, ["root", "-g"], {
+    const r = (deps.spawnSync ?? childProcess.spawnSync)(win ? `"${bin}"` : bin, args, {
       encoding: "utf8",
       timeout: 2000,
       windowsHide: true,
@@ -89,6 +122,24 @@ function safeRealpath(p: string, realpath: (p: string) => string): string {
   } catch {
     return p;
   }
+}
+
+/** Which package manager launched this run (Firecrawl's heuristic, plus yarn). */
+export function detectPackageManager(
+  env: NodeJS.ProcessEnv = process.env,
+  argv: string[] = process.argv,
+  versions: NodeJS.ProcessVersions = process.versions,
+): GlobalManager {
+  // Install and runner paths identify the manager without lifecycle metadata.
+  const entry = (argv[1] ?? "").replaceAll("\\", "/");
+  if (/bunx[-/]|\/\.bun\//.test(entry)) return "bun";
+  if (/\/pnpm\/(dlx|global)\//.test(entry)) return "pnpm";
+  const hint = `${env.npm_config_user_agent ?? ""} ${env.npm_execpath ?? ""}`;
+  if (/\bpnpm\b/i.test(hint)) return "pnpm";
+  if (/\byarn\b/i.test(hint)) return "yarn";
+  if (/\bbun\b/i.test(hint)) return "bun";
+  if (versions.bun) return "bun";
+  return "npm";
 }
 
 export function detectInstall(opts: DetectOptions = {}): InstallInfo {
@@ -134,7 +185,7 @@ export function detectInstall(opts: DetectOptions = {}): InstallInfo {
     );
   }
   // The resolved path, not the bare name: see npmRootGlobalDefault.
-  const [, ...args] = MANAGER_COMMANDS[method as keyof typeof MANAGER_COMMANDS];
+  const [, ...args] = MANAGER_COMMANDS[method as GlobalManager];
   return { method, command: [manager, ...args], blockedReason: null };
 }
 

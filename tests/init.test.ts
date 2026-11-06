@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CommanderError } from "commander";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { type InitDeps, run } from "../src/commands/init.js";
-import type { InstallInfo } from "../src/core/install-detect.js";
+import { detectPackageManager } from "../src/core/install-detect.js";
 import { ExitError } from "../src/errors.js";
 import { buildProgram } from "../src/program.js";
 import { captureOutput } from "./helpers/capture.js";
@@ -186,60 +186,93 @@ describe("init", () => {
   });
 });
 
-describe("init global install offer", () => {
-  const installedVia = (method: InstallInfo["method"]) => (): InstallInfo => ({
-    method,
-    command: null,
-    blockedReason: null,
-  });
-
-  function setup(method: InstallInfo["method"], answer: boolean) {
-    const confirm = vi.fn(async () => answer);
-    const spawnImpl = vi.fn(() => ({ status: 0 }));
+describe("init global install", () => {
+  function setup(opts: { tvly?: boolean; answer?: boolean; status?: number; tty?: boolean } = {}) {
+    const confirm = vi.fn(async () => opts.answer ?? true);
+    const spawnImpl = vi.fn((_cmd: string, args: string[]) =>
+      args[0] === "prefix" ? { status: 0, stdout: "/opt/npm\n" } : { status: opts.status ?? 0 },
+    );
     const deps: InitDeps = {
       home,
-      env: { TAVILY_API_KEY: "tvly-test" },
-      which: (name) => `/usr/bin/${name}`,
+      env: { TAVILY_API_KEY: "tvly-test", SHELL: "/bin/zsh" },
+      platform: "darwin",
+      which: (name) => (name === "tvly" && !opts.tvly ? null : `/usr/bin/${name}`),
       client: okClient,
-      stdinIsTTY: true,
-      detectInstall: installedVia(method),
+      stdinIsTTY: opts.tty ?? true,
       confirm,
       spawnImpl: spawnImpl as unknown as NonNullable<InitDeps["spawnImpl"]>,
     };
     return { deps, confirm, spawnImpl };
   }
 
-  test("npx run installs globally when confirmed", async () => {
-    const { deps, confirm, spawnImpl } = setup("npx", true);
+  test("installs globally with the resolved npm when confirmed", async () => {
+    const { deps, confirm, spawnImpl } = setup({ tvly: false });
     expect(await runInit(["--skip-skills"], deps)).toBe(0);
-    expect(confirm).toHaveBeenCalledWith("Install tvly globally so your agents can run it?");
+    expect(confirm).toHaveBeenCalledWith("Install tvly globally?");
     expect(spawnImpl).toHaveBeenCalledWith(
       "/usr/bin/npm",
-      ["install", "-g", "@tavily/cli"],
+      ["install", "-g", "@tavily/cli@latest"],
       expect.objectContaining({ stdio: "inherit" }),
     );
-    expect(io.stdout()).toContain("tvly installed globally");
+    expect(io.stdout()).toContain("tvly installed globally (npm)");
   });
 
-  test("npx run skips the install when declined", async () => {
-    const { deps, spawnImpl } = setup("npx", false);
-    expect(await runInit(["--skip-skills"], deps)).toBe(0);
+  test("declining the install continues and then fails the cli check", async () => {
+    const { deps, spawnImpl } = setup({ tvly: false, answer: false });
+    expect(await runInit(["--skip-skills"], deps)).toBe(1);
     expect(spawnImpl).not.toHaveBeenCalled();
-    expect(io.stdout()).not.toContain("tvly installed globally");
+    expect(io.stdout()).toContain("tvly is not available on PATH.");
   });
 
-  test("a global npm install is not offered a global install", async () => {
-    const { deps, confirm, spawnImpl } = setup("npm", true);
+  test("tvly already on PATH skips the install", async () => {
+    const { deps, confirm, spawnImpl } = setup({ tvly: true });
     expect(await runInit(["--skip-skills"], deps)).toBe(0);
     expect(confirm).not.toHaveBeenCalled();
     expect(spawnImpl).not.toHaveBeenCalled();
   });
 
-  test("--json never prompts or installs", async () => {
-    const { deps, confirm, spawnImpl } = setup("npx", true);
-    expect(await runInit(["--skip-skills", "--json"], deps)).toBe(0);
+  test("--yes in a non-interactive run installs without asking", async () => {
+    const { deps, confirm, spawnImpl } = setup({ tvly: false, tty: false });
+    expect(await runInit(["--skip-skills", "--yes", "--json"], deps)).toBe(0);
     expect(confirm).not.toHaveBeenCalled();
-    expect(spawnImpl).not.toHaveBeenCalled();
-    expect(stdoutJson().install).toEqual({ global: false });
+    expect(spawnImpl).toHaveBeenCalledWith(
+      "/usr/bin/npm",
+      ["install", "-g", "@tavily/cli@latest"],
+      expect.anything(),
+    );
+    expect(stdoutJson().install).toMatchObject({ global: true, manager: "npm" });
+  });
+
+  test("adds the global bin dir to the shell rc file once", async () => {
+    const line = 'export PATH="/opt/npm/bin:$PATH"';
+    for (let i = 0; i < 2; i++) {
+      const { deps } = setup({ tvly: false });
+      expect(await runInit(["--skip-skills"], deps)).toBe(0);
+      expect(io.stdout()).toContain("Added /opt/npm/bin to PATH in ~/.zshrc");
+    }
+    expect(readFileSync(join(home, ".zshrc"), "utf8").split(line).length - 1).toBe(1);
+  });
+
+  test("a failed install continues and exits one", async () => {
+    const { deps, spawnImpl } = setup({ tvly: false, status: 1 });
+    expect(await runInit(["--skip-skills"], deps)).toBe(1);
+    expect(spawnImpl).toHaveBeenCalledTimes(1);
+    expect(io.stderr()).toContain("Failed to install @tavily/cli globally using npm.");
+    expect(io.stderr()).toContain(
+      "You can run without a global install: npx @tavily/cli <command>",
+    );
+    expect(io.stdout()).toContain("Setup incomplete: global CLI installation failed.");
+  });
+});
+
+describe("detectPackageManager", () => {
+  const node = { node: "22.0.0" } as NodeJS.ProcessVersions;
+  test.each([
+    ["pnpm user agent", { npm_config_user_agent: "pnpm/9.0.0 npm/? node/v22" }, [], "pnpm"],
+    ["bunx entry", {}, ["bun", "/tmp/bunx-501-@tavily/cli/node_modules/.bin/tvly"], "bun"],
+    ["yarn user agent", { npm_config_user_agent: "yarn/4.1.0 npm/? node/v22" }, [], "yarn"],
+    ["npm default", { npm_config_user_agent: "npm/10.0.0 node/v22" }, [], "npm"],
+  ])("%s", (_name, env, argv, expected) => {
+    expect(detectPackageManager(env, argv, node)).toBe(expected);
   });
 });
