@@ -1,36 +1,17 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-
-# Distribution / packaging
-build/
+node_modules/
 dist/
-*.egg-info/
-*.egg
+coverage/
 
-# Virtual environments
-.venv/
-venv/
-env/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Environment variables
 .env
 .env.local
 
-# OS
 .DS_Store
 Thumbs.db
+.idea/
+.vscode/
+*.swp
 
-# Local agent/editor state
+# Local agent and editor state
 .claude/
-
-# Node
-node_modules/
+.superpowers/
+docs/superpowers/
