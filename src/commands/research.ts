@@ -84,16 +84,16 @@ async function waitForResult(
   opts: { json: boolean; pollInterval: number; timeout: number; label: string },
   sleep: (ms: number) => Promise<void>,
 ): Promise<Json | undefined> {
-  let elapsed = 0;
   if (opts.json) {
-    while (elapsed < opts.timeout) {
+    const deadline = Date.now() + opts.timeout * 1000;
+    while (Date.now() < deadline) {
       const response = await client.getResearch(requestId);
       if (isDone(response)) return response;
       await sleep(opts.pollInterval * 1000);
-      elapsed += opts.pollInterval;
     }
     return undefined;
   }
+  let elapsed = 0;
   const message = () => colors.aqua(`${opts.label}... ${elapsed}s elapsed`);
   const live = spinner(message(), { enabled: true });
   try {
