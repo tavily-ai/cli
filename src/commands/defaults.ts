@@ -1,5 +1,4 @@
 /** tvly set-default / unset-default — toggle agents' built-in web search. */
-import { createInterface } from "node:readline/promises";
 import { type Command, InvalidArgumentError } from "commander";
 import {
   claudeSettingsPath,
@@ -11,7 +10,7 @@ import {
   unsetCodexDefault,
 } from "../core/agent-defaults.js";
 import { colors, out } from "../ui/theme.js";
-import { resolveJson } from "./options.js";
+import { promptConfirm, resolveJson } from "./options.js";
 
 type Agent = "claude" | "codex";
 
@@ -53,17 +52,6 @@ const UNSET: Mode = {
   changedMessage: "built-in web search restored",
   unchangedMessage: "nothing to undo",
 };
-
-/** Ask `question [Y/n]`; an empty answer means yes. */
-async function promptConfirm(question: string): Promise<boolean> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const answer = (await rl.question(`${question} [Y/n]: `)).trim().toLowerCase();
-    return answer === "" || answer === "y" || answer === "yes";
-  } finally {
-    rl.close();
-  }
-}
 
 async function selectTargets(
   opts: DefaultsOptions,

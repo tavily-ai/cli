@@ -1,10 +1,10 @@
 /** tvly search — web search via the Tavily API; up to 5 queries run in parallel. */
 import { TavilyKeylessLimitError, TavilyRequestError } from "@tavily/core";
-import { type Command, InvalidArgumentError, Option } from "commander";
+import { type Command, Option } from "commander";
 import { getClientOrKeyless } from "../core/client-factory.js";
 import { applySearchFlags, searchBodyFromOptions } from "../core/search-flags.js";
 import type { Json } from "../core/tavily-client.js";
-import { ExitError } from "../errors.js";
+import { ExitError, messageOf } from "../errors.js";
 import { resolveOutput } from "../ui/output-file.js";
 import { printMultiSearchResults, printSearchResults } from "../ui/render.js";
 import { withSpinner } from "../ui/spinner.js";
@@ -13,6 +13,7 @@ import {
   keylessCapError,
   LIMIT_STATUSES,
   printKeylessCapHit,
+  QUERY_REQUIRED,
   readQueryArg,
   runWithApiErrors,
 } from "./shared.js";
@@ -39,31 +40,19 @@ export function configure(cmd: Command): void {
   addClientNameOption(cmd);
 }
 
-function readQueries(args: string[]): string[] {
+function readQueries(args: string[], cmd: Command): string[] {
   const queries =
-    args.length === 1 && args[0] === "-" ? [readQueryArg("-")] : args.filter((q) => q.trim());
-  if (queries.length === 0) {
-    throw new InvalidArgumentError(
-      "QUERY is required. Pass a query string or use '-' to read from stdin.",
-    );
-  }
+    args.length === 1 && args[0] === "-" ? [readQueryArg("-", cmd)] : args.filter((q) => q.trim());
+  if (queries.length === 0) cmd.error(QUERY_REQUIRED);
   if (queries.length > MAX_QUERIES) {
-    throw new InvalidArgumentError(
-      `At most ${MAX_QUERIES} queries per command, got ${queries.length}.`,
-    );
+    cmd.error(`error: At most ${MAX_QUERIES} queries per command, got ${queries.length}.`);
   }
   return queries;
 }
 
 export async function run(args: string[], opts: SearchOptions, cmd: Command): Promise<void> {
   const json = resolveJson(cmd);
-  let queries: string[];
-  try {
-    queries = readQueries(args);
-  } catch (e) {
-    if (e instanceof InvalidArgumentError) cmd.error(`error: ${e.message}`);
-    throw e;
-  }
+  const queries = readQueries(args, cmd);
   const outputFile = resolveOutput(opts.output, "search", queries[0]);
   // One search's worth of text per command, however many queries it holds.
   const maxChars = opts.maxChars ?? Math.floor(DEFAULT_CHARS / queries.length);
@@ -94,7 +83,7 @@ export async function run(args: string[], opts: SearchOptions, cmd: Command): Pr
             return { query, error: keylessCapError(e) };
           }
           if (e instanceof TavilyRequestError && LIMIT_STATUSES.has(e.status)) limitHit = true;
-          return { query, error: e instanceof Error ? e.message : String(e) };
+          return { query, error: messageOf(e) };
         }
       }),
     ),

@@ -2,7 +2,7 @@ import { createInterface } from "node:readline/promises";
 import { type Command, CommanderError } from "commander";
 import { getApiKeyOrExit } from "./commands/common.js";
 import { authSource } from "./core/config.js";
-import { ExitError } from "./errors.js";
+import { ExitError, messageOf } from "./errors.js";
 import { buildProgram } from "./program.js";
 import { sanitizeControl } from "./ui/text.js";
 import { colorEnabled, colors, LOGO } from "./ui/theme.js";
@@ -171,9 +171,7 @@ export async function runRepl(opts: ReplOptions = {}): Promise<void> {
       try {
         args = splitShellWords(line);
       } catch (e) {
-        say(
-          `  ${colors.pink("Parse error:")} ${sanitizeControl(e instanceof Error ? e.message : e)}`,
-        );
+        say(`  ${colors.pink("Parse error:")} ${sanitizeControl(messageOf(e))}`);
         continue;
       }
       if (args[0] === "tvly") args = args.slice(1);
@@ -197,9 +195,7 @@ export async function runRepl(opts: ReplOptions = {}): Promise<void> {
         } else if (e instanceof CommanderError) {
           if (e.exitCode !== 0) say(`  ${colors.pink(">")} ${sanitizeControl(e.message)}`);
         } else {
-          say(
-            `  ${colors.pink("> Error:")} ${sanitizeControl(e instanceof Error ? e.message : e)}`,
-          );
+          say(`  ${colors.pink("> Error:")} ${sanitizeControl(messageOf(e))}`);
         }
       } finally {
         if ((input as { readableEnded?: boolean }).readableEnded) closed = true;

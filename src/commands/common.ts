@@ -1,12 +1,12 @@
 /** Credential helpers for commands that never call the API, so they stay free of the SDK. */
 import { type ConfigOptions, getApiKey } from "../core/config.js";
-import { ExitError, OAuthError } from "../errors.js";
+import { ExitError, messageOf, OAuthError } from "../errors.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
 
 /** Render a stored OAuth refresh failure without treating it as logout. */
 export function handleOauthRefreshError(e: unknown, json: boolean): never {
-  const text = sanitizeControl(e instanceof Error ? e.message : String(e));
+  const text = sanitizeControl(messageOf(e));
   if (json) {
     out(JSON.stringify({ error: { code: "oauth_refresh_failed", message: text } }));
   } else {

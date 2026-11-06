@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { OAuthError } from "../errors.js";
+import { isObject, messageOf, OAuthError } from "../errors.js";
 
 export const MCP_ISSUER = "https://mcp.tavily.com/";
 export const MCP_RESOURCE = "https://mcp.tavily.com/mcp";
@@ -111,7 +111,7 @@ async function transport<T>(fn: () => Promise<T>): Promise<T> {
     return await fn();
   } catch (e) {
     const cause = e instanceof Error && e.cause instanceof Error ? e.cause.message : "";
-    const message = e instanceof Error ? e.message : String(e);
+    const message = messageOf(e);
     throw new OAuthError(
       `Could not reach the Tavily OAuth server: ${message}${cause ? `: ${cause}` : ""}`,
     );
@@ -177,10 +177,6 @@ export async function fetchMetadata(
     revocationEndpoint: revocation ? validatedHttpsUrl(revocation, "revocation_endpoint") : null,
     resource,
   };
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function jsonObjectResponse(

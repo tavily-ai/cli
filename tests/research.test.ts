@@ -228,6 +228,11 @@ test("query from stdin; an empty query is a usage error", async () => {
   expect(research).toHaveBeenCalledWith({ input: "from stdin" });
   expect(await runProgram(["research", "-"], stubClient({ research }), { stdin: " " })).toBe(2);
   expect(io.stderr()).toContain("QUERY is required");
+  // stdin is capped at 100,000 characters.
+  await runProgram(["research", "-", "--json"], stubClient({ research }), {
+    stdin: "x".repeat(200_000),
+  });
+  expect(research).toHaveBeenLastCalledWith({ input: "x".repeat(100_000) });
 });
 
 test("`research status` with no id researches the word status", async () => {

@@ -3,7 +3,7 @@ import * as childProcess from "node:child_process";
 import { realpathSync } from "node:fs";
 import type { Command } from "commander";
 import { detectInstall, fetchLatestVersion, type InstallInfo } from "../core/install-detect.js";
-import { ExitError } from "../errors.js";
+import { ExitError, messageOf } from "../errors.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
 import { compareVersions, isNewer } from "../util/semver.js";
@@ -29,8 +29,6 @@ export interface UpdateDeps {
 interface UpdateOptions {
   check?: boolean;
 }
-
-const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 export async function run(opts: UpdateOptions, cmd: Command, deps: UpdateDeps = {}): Promise<void> {
   const json = resolveJson(cmd);

@@ -1,8 +1,9 @@
 /** tvly research — deep research via the Tavily API (async: run/status/poll, or a live stream). */
 import { readFileSync } from "node:fs";
-import { type Command, InvalidArgumentError } from "commander";
+import type { Command } from "commander";
 import { getKeyedClient } from "../core/client-factory.js";
 import type { Json, TavilyClientLike } from "../core/tavily-client.js";
+import { messageOf } from "../errors.js";
 import { resolveOutput } from "../ui/output-file.js";
 import { emit, printResearchResult } from "../ui/render.js";
 import { spinner, withSpinner } from "../ui/spinner.js";
@@ -160,13 +161,7 @@ export async function run(
   opts: RunOptions,
   cmd: Command,
 ): Promise<void> {
-  let input: string;
-  try {
-    input = readQueryArg(query);
-  } catch (e) {
-    if (e instanceof InvalidArgumentError) cmd.error(`error: ${e.message}`);
-    throw e;
-  }
+  const input = readQueryArg(query, cmd);
   const outputFile = resolveOutput(opts.output, "research", input);
 
   const body: Json = { input };
@@ -175,8 +170,7 @@ export async function run(
     try {
       body.output_schema = JSON.parse(readFileSync(opts.outputSchema, "utf8"));
     } catch (e) {
-      const reason = e instanceof Error ? e.message : String(e);
-      cmd.error(`error: --output-schema must be a path to a JSON file: ${reason}`);
+      cmd.error(`error: --output-schema must be a path to a JSON file: ${messageOf(e)}`);
     }
   }
   if (opts.citationFormat !== undefined) body.citation_format = opts.citationFormat;

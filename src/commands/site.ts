@@ -1,0 +1,78 @@
+/** tvly crawl and tvly map — walk a website via the Tavily API (both need an API key). */
+import type { Command } from "commander";
+import { getKeyedClient } from "../core/client-factory.js";
+import { resolveOutput } from "../ui/output-file.js";
+import { printCrawlResults, printMapResults } from "../ui/render.js";
+import { withSpinner } from "../ui/spinner.js";
+import { hostOf } from "../ui/text.js";
+import { resolveJson } from "./options.js";
+import { definedSnake, runWithApiErrors, splitCsv } from "./shared.js";
+
+/** The options crawl and map share. */
+interface SiteOptions {
+  maxDepth?: number;
+  maxBreadth?: number;
+  limit?: number;
+  instructions?: string;
+  selectPaths?: string;
+  excludePaths?: string;
+  selectDomains?: string;
+  excludeDomains?: string;
+  /** `--allow-external` */
+  allowExternal?: boolean;
+  /** false for `--no-external` */
+  external?: boolean;
+  timeout?: number;
+  output?: string;
+  clientName?: string;
+}
+
+interface CrawlOptions extends SiteOptions {
+  chunksPerSource?: number;
+  extractDepth?: string;
+  format?: string;
+  includeImages?: boolean;
+  outputDir?: string;
+}
+
+/** The shared options as the API's request body (unset ones are left out). */
+function siteBody(url: string, opts: SiteOptions): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    url,
+    ...definedSnake(opts, ["maxDepth", "maxBreadth", "limit", "instructions"]),
+  };
+  const lists = {
+    select_paths: splitCsv(opts.selectPaths),
+    exclude_paths: splitCsv(opts.excludePaths),
+    select_domains: splitCsv(opts.selectDomains),
+    exclude_domains: splitCsv(opts.excludeDomains),
+  };
+  for (const [key, value] of Object.entries(lists)) if (value) body[key] = value;
+  const allowExternal = opts.external === false ? false : opts.allowExternal;
+  if (allowExternal !== undefined) body.allow_external = allowExternal;
+  return { ...body, ...definedSnake(opts, ["timeout"]) };
+}
+
+export async function runCrawl(url: string, opts: CrawlOptions, cmd: Command): Promise<void> {
+  const json = resolveJson(cmd);
+  const outputFile = resolveOutput(opts.output, "crawl", hostOf(url));
+  const client = await getKeyedClient("crawl", { json, clientName: opts.clientName });
+  const body = {
+    ...siteBody(url, opts),
+    ...definedSnake(opts, ["chunksPerSource", "extractDepth", "format", "includeImages"]),
+  };
+  const response = await runWithApiErrors(json, () =>
+    withSpinner(`Crawling ${url}...`, { enabled: !json }, () => client.crawl(body)),
+  );
+  await printCrawlResults(response, { json, outputFile, outputDir: opts.outputDir });
+}
+
+export async function runMap(url: string, opts: SiteOptions, cmd: Command): Promise<void> {
+  const json = resolveJson(cmd);
+  const outputFile = resolveOutput(opts.output, "map", hostOf(url));
+  const client = await getKeyedClient("map", { json, clientName: opts.clientName });
+  const response = await runWithApiErrors(json, () =>
+    withSpinner(`Mapping ${url}...`, { enabled: !json }, () => client.map(siteBody(url, opts))),
+  );
+  await printMapResults(response, { json, outputFile });
+}

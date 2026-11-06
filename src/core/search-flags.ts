@@ -43,7 +43,7 @@ const PYTHON_ORDER: readonly SearchKey[] = [
 
 const kebab = (key: string) => key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
 // The regex the SDK's serializeSearchParameters uses.
-const snake = (key: string) => key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+export const snake = (key: string) => key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 
 function checkChoice(raw: string, choices: readonly string[]): string {
   if (!choices.includes(raw)) {

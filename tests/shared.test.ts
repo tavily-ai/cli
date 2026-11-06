@@ -199,15 +199,14 @@ test("splitCsv", () => {
   expect(splitCsv("a.com, b.com")).toEqual(["a.com", "b.com"]);
 });
 
-test("readQueryArg", () => {
-  expect(readQueryArg("hello")).toBe("hello");
-  expect(readQueryArg("-", () => "  from stdin\n")).toBe("from stdin");
-  for (const q of [undefined, "", "-"]) {
-    expect(() => readQueryArg(q, () => "  ")).toThrow(
-      "QUERY is required. Pass a query string or use '-' to read from stdin.",
+test("readQueryArg (stdin cases are in research.test.ts)", () => {
+  const cmd = new Command().exitOverride().configureOutput({ writeErr: () => {} });
+  expect(readQueryArg(" hello ", cmd)).toBe("hello");
+  for (const q of [undefined, "", "  "]) {
+    expect(() => readQueryArg(q, cmd)).toThrow(
+      "error: QUERY is required. Pass a query string or use '-' to read from stdin.",
     );
   }
-  expect(readQueryArg("-", () => "x".repeat(200_000))).toHaveLength(100_000);
 });
 
 test("resolveOutput", () => {

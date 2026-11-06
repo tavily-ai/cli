@@ -1,13 +1,12 @@
 /** tvly extract — extract content from URLs via the Tavily API. */
 import type { Command } from "commander";
 import { getClientOrKeyless } from "../core/client-factory.js";
-import type { Json } from "../core/tavily-client.js";
 import { resolveOutput } from "../ui/output-file.js";
 import { printExtractResults } from "../ui/render.js";
 import { withSpinner } from "../ui/spinner.js";
 import { domainOf } from "../ui/text.js";
 import { resolveJson } from "./options.js";
-import { runWithApiErrors } from "./shared.js";
+import { definedSnake, runWithApiErrors } from "./shared.js";
 
 const MAX_URLS = 20;
 
@@ -27,13 +26,17 @@ export async function run(urls: string[], opts: ExtractOptions, cmd: Command): P
   if (urls.length > MAX_URLS) cmd.error(`error: Maximum ${MAX_URLS} URLs per request.`);
   const outputFile = resolveOutput(opts.output, "extract", domainOf(urls[0] ?? ""));
 
-  const body: Json = { urls };
-  if (opts.query !== undefined) body.query = opts.query;
-  if (opts.chunksPerSource !== undefined) body.chunks_per_source = opts.chunksPerSource;
-  if (opts.extractDepth !== undefined) body.extract_depth = opts.extractDepth;
-  if (opts.format !== undefined) body.format = opts.format;
-  if (opts.includeImages) body.include_images = true;
-  if (opts.timeout !== undefined) body.timeout = opts.timeout;
+  const body = {
+    urls,
+    ...definedSnake(opts, [
+      "query",
+      "chunksPerSource",
+      "extractDepth",
+      "format",
+      "includeImages",
+      "timeout",
+    ]),
+  };
 
   const response = await runWithApiErrors(json, async () => {
     const client = await getClientOrKeyless(opts.clientName);

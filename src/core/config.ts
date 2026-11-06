@@ -11,7 +11,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import lockfile from "proper-lockfile";
-import { OAuthError } from "../errors.js";
+import { isObject, messageOf, OAuthError } from "../errors.js";
 import {
   fetchMetadata,
   MCP_ISSUER,
@@ -46,16 +46,8 @@ export function configPaths(home?: string) {
   };
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value !== "";
-}
-
-function errorMessage(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
 }
 
 export function readConfig(opts: ConfigOptions = {}): Config {
@@ -396,7 +388,7 @@ async function oauthAccessToken(config: Config, opts: ConfigOptions): Promise<st
     throw new OAuthError(
       "Could not refresh the stored Tavily OAuth session. " +
         "The stored credentials were not removed; retry the command, and run `tvly login` only if it continues. " +
-        `Details: ${errorMessage(e)}`,
+        `Details: ${messageOf(e)}`,
     );
   }
 }

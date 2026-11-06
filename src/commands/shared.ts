@@ -1,8 +1,9 @@
 /** Helpers shared by the API commands: API error handling, query/CSV parsing. */
 import { readFileSync } from "node:fs";
 import { TavilyKeylessLimitError, TavilyRequestError } from "@tavily/core";
-import { InvalidArgumentError } from "commander";
-import { ExitError, OAuthError } from "../errors.js";
+import type { Command } from "commander";
+import { snake } from "../core/search-flags.js";
+import { ExitError, messageOf, OAuthError } from "../errors.js";
 import { formatKeylessEnvelopeForTerminal } from "../ui/keyless.js";
 import { safeLink, sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
@@ -10,8 +11,6 @@ import { handleOauthRefreshError } from "./common.js";
 
 // Status codes that represent usage/plan limits rather than real errors.
 export const LIMIT_STATUSES: ReadonlySet<number> = new Set([429, 432]);
-
-const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 export function keylessCapError(e: TavilyKeylessLimitError) {
   return {
@@ -53,10 +52,10 @@ export function handleKeylessCapHit(e: TavilyKeylessLimitError, json: boolean): 
 export function handleApiError(e: unknown, json: boolean): never {
   const limit = e instanceof TavilyRequestError && LIMIT_STATUSES.has(e.status);
   if (json) {
-    out(JSON.stringify({ error: message(e) }));
+    out(JSON.stringify({ error: messageOf(e) }));
     throw new ExitError(limit ? 3 : 4);
   }
-  const text = sanitizeControl(message(e));
+  const text = sanitizeControl(messageOf(e));
   if (limit) {
     err();
     err(`  ${colors.yellow(">")} ${text}`);
@@ -88,54 +87,25 @@ export function splitCsv(value?: string): string[] | undefined {
   return value ? value.split(",").map((part) => part.trim()) : undefined;
 }
 
-const MAX_STDIN_CHARS = 100_000;
-
-/** The query argument; `-` reads it from stdin. */
-export function readQueryArg(
-  query: string | undefined,
-  readStdin: () => string = () => readFileSync(0, "utf8"),
-): string {
-  const value = (query === "-" ? readStdin().slice(0, MAX_STDIN_CHARS) : (query ?? "")).trim();
-  if (!value) {
-    throw new InvalidArgumentError(
-      "QUERY is required. Pass a query string or use '-' to read from stdin.",
-    );
+/** The options in `keys` that are set, under their snake_case API names, in `keys` order. */
+export function definedSnake(opts: object, keys: readonly string[]): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  for (const key of keys) {
+    const value = (opts as Record<string, unknown>)[key];
+    if (value !== undefined) body[snake(key)] = value;
   }
-  return value;
-}
-
-/** The options crawl and map share, as the API's request body (unset ones are left out). */
-export interface SiteOptions {
-  maxDepth?: number;
-  maxBreadth?: number;
-  limit?: number;
-  instructions?: string;
-  selectPaths?: string;
-  excludePaths?: string;
-  selectDomains?: string;
-  excludeDomains?: string;
-  /** `--allow-external` */
-  allowExternal?: boolean;
-  /** false for `--no-external` */
-  external?: boolean;
-  timeout?: number;
-}
-
-export function siteBody(url: string, opts: SiteOptions): Record<string, unknown> {
-  const body: Record<string, unknown> = { url };
-  if (opts.maxDepth !== undefined) body.max_depth = opts.maxDepth;
-  if (opts.maxBreadth !== undefined) body.max_breadth = opts.maxBreadth;
-  if (opts.limit !== undefined) body.limit = opts.limit;
-  if (opts.instructions !== undefined) body.instructions = opts.instructions;
-  const lists = {
-    select_paths: splitCsv(opts.selectPaths),
-    exclude_paths: splitCsv(opts.excludePaths),
-    select_domains: splitCsv(opts.selectDomains),
-    exclude_domains: splitCsv(opts.excludeDomains),
-  };
-  for (const [key, value] of Object.entries(lists)) if (value) body[key] = value;
-  const allowExternal = opts.external === false ? false : opts.allowExternal;
-  if (allowExternal !== undefined) body.allow_external = allowExternal;
-  if (opts.timeout !== undefined) body.timeout = opts.timeout;
   return body;
+}
+
+const MAX_STDIN_CHARS = 100_000;
+export const QUERY_REQUIRED =
+  "error: QUERY is required. Pass a query string or use '-' to read from stdin.";
+
+/** The query argument; `-` reads it from stdin. A blank query is a usage error. */
+export function readQueryArg(query: string | undefined, cmd: Command): string {
+  const value = (
+    query === "-" ? readFileSync(0, "utf8").slice(0, MAX_STDIN_CHARS) : (query ?? "")
+  ).trim();
+  if (!value) cmd.error(QUERY_REQUIRED);
+  return value;
 }

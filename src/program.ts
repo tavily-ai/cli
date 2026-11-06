@@ -177,7 +177,7 @@ export function buildProgram(): Command {
     .option("--output-dir <dir>", "Save each page as a .md file in this directory.")
     .addHelpText("after", needsKey)
     .action(async (url: string, opts: Record<string, unknown>, cmd: Command) => {
-      await (await import("./commands/crawl.js")).run(url, opts, cmd);
+      await (await import("./commands/site.js")).runCrawl(url, opts, cmd);
     });
   addOutputOption(crawl);
   addClientNameOption(crawl);
@@ -191,7 +191,7 @@ export function buildProgram(): Command {
   map
     .addHelpText("after", needsKey)
     .action(async (url: string, opts: Record<string, unknown>, cmd: Command) => {
-      await (await import("./commands/map.js")).run(url, opts, cmd);
+      await (await import("./commands/site.js")).runMap(url, opts, cmd);
     });
   addOutputOption(map);
   addClientNameOption(map);

@@ -1,4 +1,5 @@
 /** Terminal rendering for the Tavily API's keyless rate-limit envelope. */
+import { isObject } from "../errors.js";
 
 /** Compact human duration for retry-after hints. */
 export function formatSeconds(seconds: number): string {
@@ -20,10 +21,6 @@ export function formatSeconds(seconds: number): string {
 
 type Action = Record<string, unknown>;
 
-function isAction(value: unknown): value is Action {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 /** Python truthiness for the `or` defaults the envelope fields use. */
 const orDefault = (value: unknown, fallback: string): string => (value ? String(value) : fallback);
 
@@ -42,7 +39,7 @@ export function formatKeylessEnvelopeForTerminal(opts: {
     lines.push("", `Retry after: ${formatSeconds(retry)} (${retry}s)`);
   }
 
-  const actions = (opts.nextActions ?? []).filter(isAction);
+  const actions = (opts.nextActions ?? []).filter(isObject);
   const last = (type: string, accept: (a: Action) => boolean = () => true) =>
     [...actions].reverse().find((a) => a.type === type && accept(a));
   const signup = last("signup");

@@ -3,6 +3,7 @@
  * accepted by the MCP JSON-RPC endpoint, not by api.tavily.com.
  */
 import { TavilyRequestError } from "@tavily/core";
+import { isObject, messageOf } from "../errors.js";
 import { sseDataLines } from "./sse.js";
 import type { Json, TavilyClientLike } from "./tavily-client.js";
 
@@ -15,10 +16,6 @@ export interface McpClientOptions {
   humanId?: string;
   clientName?: string;
   fetchImpl?: typeof fetch;
-}
-
-function isObject(value: unknown): value is Json {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -128,9 +125,7 @@ export function createMcpClient(opts: McpClientOptions): TavilyClientLike {
       status = resp.status;
       text = await resp.text();
     } catch (e) {
-      throw new Error(
-        `Could not reach the Tavily MCP server: ${e instanceof Error ? e.message : String(e)}`,
-      );
+      throw new Error(`Could not reach the Tavily MCP server: ${messageOf(e)}`);
     }
     if (status < 200 || status >= 300) {
       throw new TavilyRequestError({

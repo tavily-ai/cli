@@ -3,7 +3,6 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { createInterface } from "node:readline/promises";
 import type { Command } from "commander";
 import { getClientOrKeyless } from "../core/client-factory.js";
 import {
@@ -30,11 +29,11 @@ import {
   whichOnPath,
 } from "../core/skills.js";
 import type { TavilyClientLike } from "../core/tavily-client.js";
-import { ExitError } from "../errors.js";
+import { ExitError, messageOf } from "../errors.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
 import { VERSION } from "../version.js";
-import { resolveJson } from "./options.js";
+import { promptConfirm, resolveJson } from "./options.js";
 
 export interface InitDeps extends ConfigOptions {
   login?: typeof runBrowserLogin;
@@ -68,16 +67,6 @@ interface InitResult {
   verification: { cli: boolean; auth: boolean; live_search: boolean };
   install: { global: boolean; manager: string | null; on_path: boolean; path_updated: boolean };
   error?: { stage: string; message: string };
-}
-
-async function promptConfirm(question: string): Promise<boolean> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const answer = (await rl.question(`${question} [Y/n]: `)).trim().toLowerCase();
-    return answer === "" || answer === "y" || answer === "yes";
-  } finally {
-    rl.close();
-  }
 }
 
 export async function run(opts: InitOptions, cmd: Command, deps: InitDeps = {}): Promise<void> {
@@ -251,8 +240,6 @@ async function fixPath(
   err(`Until then you can still run: ${MANAGER_RUNNERS[manager]} <command>`);
   return null;
 }
-
-const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 async function selectAgents(
   requested: string[],
