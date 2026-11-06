@@ -48,12 +48,7 @@ export async function runLogin(
   const configFile = configPaths(deps.home).file;
 
   if (opts.apiKey) {
-    try {
-      await saveApiKey(opts.apiKey, config);
-    } catch (e) {
-      if (e instanceof OAuthError) failLogin(e.message, json);
-      throw e;
-    }
+    await saveApiKey(opts.apiKey, config);
     printLoginSuccess("API key", `Saved to ${configFile}`, json);
     return;
   }

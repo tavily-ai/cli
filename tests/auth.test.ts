@@ -195,18 +195,16 @@ describe("login", () => {
     expect(io.stderr()).toBe("");
   });
 
-  test("--api-key --json reports replacement revocation failure", async () => {
+  test("--api-key --json saves the key even when revoking the old oauth fails", async () => {
     writeConfig({ oauth: storedOauth });
     const code = await runAuthProgram(["--json", "login", "--api-key", "tvly-replacement"], {
       home,
       env: {},
       fetchImpl: fetchWith(500),
     });
-    expect(code).toBe(3);
-    const body = stdoutJson();
-    expect(body.authenticated).toBe(false);
-    expect(body.error).toContain("Token revocation failed (HTTP 500)");
-    expect(readConfig({ home, env: {} })).toHaveProperty("oauth.access_token", "old-access");
+    expect(code).toBe(0);
+    expect(stdoutJson().authenticated).toBe(true);
+    expect(readConfig({ home, env: {} })).toEqual({ api_key: "tvly-replacement" });
   });
 
   test("--api-key --json saves the key", async () => {

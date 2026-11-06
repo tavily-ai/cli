@@ -163,10 +163,16 @@ function withRefreshedSession(config: Config, session: OAuthSession): Config {
   return { ...withoutKeys(config, "api_key"), oauth: oauthSessionData(session) };
 }
 
-/** Replace stored credentials with an API key, revoking old OAuth first. */
+/** Replace stored credentials with an API key, revoking old OAuth first (best effort). */
 export async function saveApiKey(apiKey: string, opts: ConfigOptions = {}): Promise<void> {
   await withConfigLock(async (config) => {
-    if (isObject(config.oauth)) await revokeStoredOauth(config.oauth, opts);
+    if (isObject(config.oauth)) {
+      try {
+        await revokeStoredOauth(config.oauth, opts);
+      } catch {
+        // Like clearCredentials: an offline or incomplete OAuth session must not block saving the key.
+      }
+    }
     return { config: { ...withoutKeys(config, "oauth"), api_key: apiKey }, result: undefined };
   }, opts);
 }
