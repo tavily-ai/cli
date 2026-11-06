@@ -455,6 +455,13 @@ test("environment API key wins over stored credentials", async () => {
   expect(await getApiKey({ ...opts, env: { TAVILY_API_KEY: "tvly-env" } })).toBe("tvly-env");
 });
 
+test("getApiKey with an unwritable HOME and no env key resolves keyless instead of throwing", async () => {
+  // A regular file as HOME: ~/.tavily can be neither read nor created.
+  const fileHome = path.join(home, "not-a-dir");
+  writeFileSync(fileHome, "");
+  expect(await getApiKey({ home: fileHome, env: {} })).toBeNull();
+});
+
 test("saving a refreshed session never revokes and drops api_key", async () => {
   await writeConfig({ api_key: "tvly-x", human_id: "h", oauth: previousOauth });
   const server = fakeServer();

@@ -400,10 +400,19 @@ export async function getApiKey(opts: ConfigOptions = {}): Promise<string | null
   const envKey = (opts.env ?? process.env).TAVILY_API_KEY;
   if (envKey) return envKey;
 
-  const stored = await withConfigLock(async (config) => {
-    if (nonEmptyString(config.api_key)) return { result: config.api_key };
-    return { result: await oauthAccessToken(config, opts) };
-  }, opts);
+  // Read without the lock (or creating ~/.tavily) so keyless use works with an unwritable HOME;
+  // only an expired OAuth session, which refreshes and writes, takes the lock and re-reads.
+  const config = readConfig(opts);
+  if (nonEmptyString(config.api_key)) return config.api_key;
+  const oauth = config.oauth;
+  const needsRefresh =
+    isObject(oauth) && nonEmptyString(oauth.access_token) && tokenIsExpired(oauth.expires_at);
+  const stored = needsRefresh
+    ? await withConfigLock(async (fresh) => {
+        if (nonEmptyString(fresh.api_key)) return { result: fresh.api_key };
+        return { result: await oauthAccessToken(fresh, opts) };
+      }, opts)
+    : await oauthAccessToken(config, opts);
   return stored ?? getMcpToken(opts);
 }
 
