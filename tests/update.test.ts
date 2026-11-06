@@ -231,6 +231,7 @@ const base = (over: Partial<UpdateDeps> = {}): UpdateDeps => ({
   argv1: "/x/cli.js",
   realpath: ids,
   spawnImpl: neverSpawn,
+  platform: "linux",
   ...over,
 });
 
