@@ -1,4 +1,4 @@
-/** tvly init — install tvly globally, authenticate, install Tavily skills, and verify. */
+/** tvly init — install tvly globally, authenticate, install Tavily skills and workflows, and verify. */
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -25,6 +25,7 @@ import {
   installAgentSkills,
   SKILLS_REPO,
   type SkillsInstallResult,
+  WORKFLOWS_REPO,
 } from "../core/skills.js";
 import type { TavilyClientLike } from "../core/tavily-client.js";
 import { ExitError, messageOf } from "../errors.js";
@@ -37,7 +38,7 @@ import { promptConfirm, resolveJson } from "./options.js";
 export interface InitDeps extends ConfigOptions {
   login?: typeof runBrowserLogin;
   openImpl?: (url: string) => void;
-  installSkills?: (agents: string[]) => Promise<SkillsInstallResult>;
+  installSkills?: (repo: string, agents: string[]) => Promise<SkillsInstallResult>;
   which?: (name: string) => string | null;
   stdinIsTTY?: boolean;
   confirm?: (question: string) => Promise<boolean>;
@@ -52,6 +53,7 @@ export interface InitOptions {
   yes?: boolean;
   skipAuth?: boolean;
   skipSkills?: boolean;
+  skipWorkflows?: boolean;
   skipInstall?: boolean;
   apiKey?: string;
   browser?: boolean;
@@ -63,6 +65,7 @@ interface InitResult {
   mode: string;
   auth: { authenticated: boolean; method: string };
   skills: { source: string; agents: string[]; restart_required: boolean; skipped: boolean };
+  workflows: { source: string; agents: string[]; restart_required: boolean; skipped: boolean };
   verification: { cli: boolean; auth: boolean; live_search: boolean };
   install: { global: boolean; manager: string | null; on_path: boolean; path_updated: boolean };
   error?: { stage: string; message: string };
@@ -79,10 +82,9 @@ export async function run(opts: InitOptions, cmd: Command, deps: InitDeps = {}):
   const which = deps.which ?? defaultWhich(deps.env ?? process.env);
   const step = await installStep(opts, json, which, deps);
 
-  const agents = await selectAgents(requested, opts, json, deps);
-  const result = emptyResult(agents);
+  const { agents, skills, workflows } = await selectAgents(requested, opts, json, deps);
+  const result = emptyResult(skills ? agents : [], workflows ? agents : []);
   result.install = step.install;
-  result.skills.skipped = opts.skipSkills === true || agents.length === 0;
 
   try {
     const auth = await ensureAuth(opts, deps);
@@ -93,12 +95,14 @@ export async function run(opts: InitOptions, cmd: Command, deps: InitDeps = {}):
     return fail(result, "auth", messageOf(e), 3, json);
   }
 
-  if (!result.skills.skipped) {
+  const install = deps.installSkills ?? ((repo, names) => installAgentSkills(repo, names, deps));
+  for (const stage of ["skills", "workflows"] as const) {
+    const part = result[stage];
+    if (part.skipped) continue;
     try {
-      const install = deps.installSkills ?? ((names) => installAgentSkills(names, deps));
-      result.skills.restart_required = (await install(agents)).restartRequired;
+      part.restart_required = (await install(part.source, part.agents)).restartRequired;
     } catch (e) {
-      return fail(result, "skills", messageOf(e), 1, json);
+      return fail(result, stage, messageOf(e), 1, json);
     }
   }
 
@@ -245,18 +249,19 @@ async function selectAgents(
   opts: InitOptions,
   json: boolean,
   deps: InitDeps,
-): Promise<string[]> {
-  if (opts.skipSkills) return [];
-  if (requested.length) return requested;
+): Promise<{ agents: string[]; skills: boolean; workflows: boolean }> {
+  if (opts.skipSkills) return { agents: [], skills: false, workflows: false };
+  const agents: string[] = requested.length ? requested : detectAgents(deps);
 
-  const detected: string[] = detectAgents(deps);
   const isTTY = deps.stdinIsTTY ?? process.stdin.isTTY === true;
-  if (!detected.length || opts.all || opts.yes || json || !isTTY) return detected;
-
-  const ok = await (deps.confirm ?? promptConfirm)(
-    `Install Tavily skills for detected agents (${detected.join(", ")})?`,
-  );
-  return ok ? detected : [];
+  const ask = !requested.length && agents.length > 0 && !opts.all && !opts.yes && !json && isTTY;
+  const confirm = deps.confirm ?? promptConfirm;
+  const skills =
+    !ask || (await confirm(`Install Tavily skills for detected agents (${agents.join(", ")})?`));
+  const workflows =
+    !opts.skipWorkflows &&
+    (!ask || (await confirm(`Install the Tavily official workflows (${WORKFLOWS_REPO})?`)));
+  return { agents, skills, workflows };
 }
 
 async function ensureAuth(
@@ -292,13 +297,24 @@ async function verifyLiveSearch(deps: InitDeps): Promise<boolean> {
   return Array.isArray((response as { results?: unknown } | null)?.results);
 }
 
-function emptyResult(agents: string[]): InitResult {
+function emptyResult(skillsAgents: string[], workflowsAgents: string[]): InitResult {
   return {
     ok: false,
     version: VERSION,
     mode: "unknown",
     auth: { authenticated: false, method: "none" },
-    skills: { source: SKILLS_REPO, agents, restart_required: false, skipped: false },
+    skills: {
+      source: SKILLS_REPO,
+      agents: skillsAgents,
+      restart_required: false,
+      skipped: skillsAgents.length === 0,
+    },
+    workflows: {
+      source: WORKFLOWS_REPO,
+      agents: workflowsAgents,
+      restart_required: false,
+      skipped: workflowsAgents.length === 0,
+    },
     verification: { cli: false, auth: false, live_search: false },
     install: { global: false, manager: null, on_path: false, path_updated: false },
   };
@@ -331,21 +347,24 @@ function printResult(result: InitResult, json: boolean, pathNote: string | null 
   }
   out(`  ${colors.green("> Tavily is ready")}`);
 
-  const { auth, skills } = result;
+  const { auth, skills, workflows } = result;
   if (auth.authenticated) out(`    ${colors.green("✓")} Authenticated via ${auth.method}`);
   else out(`    ${colors.yellow("•")} Keyless mode`);
 
   if (skills.skipped) out(`    ${colors.dim("• Skills skipped")}`);
   else out(`    ${colors.green("✓")} Tavily skills ready for ${skills.agents.join(", ")}`);
+  if (workflows.skipped) out(`    ${colors.dim("• Workflows skipped")}`);
+  else out(`    ${colors.green("✓")} Tavily workflows ready for ${workflows.agents.join(", ")}`);
   out(`    ${colors.green("✓")} Live search verified`);
   if (result.install.global) {
     out(`    ${colors.green("✓")} tvly installed globally (${result.install.manager})`);
   }
   if (pathNote) out(`    ${colors.green("✓")} ${pathNote}`);
 
-  if (skills.restart_required) {
+  if (skills.restart_required || workflows.restart_required) {
+    const restart = skills.restart_required ? skills.agents : workflows.agents;
     out();
-    out(`    ${colors.dim(`Restart ${skills.agents.join(", ")} to load newly installed skills.`)}`);
+    out(`    ${colors.dim(`Restart ${restart.join(", ")} to load newly installed skills.`)}`);
   }
 
   out();

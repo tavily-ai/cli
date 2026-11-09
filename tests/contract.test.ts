@@ -125,13 +125,20 @@ describe("JSON and plain output match the Python CLI", () => {
           expect(typeof actual[key]).toBe(typeof expected[key]);
         }
       } else if (base === "init") {
-        // `install` is new in the TypeScript CLI: it records the global-install step.
-        const { install, ...rest } = actual;
+        // `install` and `workflows` are new in the TypeScript CLI: the global-install and
+        // official-workflows steps.
+        const { install, workflows, ...rest } = actual;
         expect(install).toEqual({
           global: false,
           manager: null,
           on_path: true,
           path_updated: false,
+        });
+        expect(workflows).toEqual({
+          source: "tavily-ai/official-workflows",
+          agents: [],
+          restart_required: false,
+          skipped: true,
         });
         expect(rest).toEqual(expected);
       } else {
@@ -143,7 +150,9 @@ describe("JSON and plain output match the Python CLI", () => {
       const py = recorded(`${base}-plain`);
       const ts = await runTs(args);
       expect(ts.code).toBe(py.code);
-      expect(normalize(ts.stdout, VERSION)).toBe(normalize(py.stdout, PYTHON_VERSION));
+      // The workflows line is new in the TypeScript CLI's init summary.
+      const stdout = base === "init" ? ts.stdout.replace(/.*Workflows skipped.*\n/, "") : ts.stdout;
+      expect(normalize(stdout, VERSION)).toBe(normalize(py.stdout, PYTHON_VERSION));
     });
   }
 });
