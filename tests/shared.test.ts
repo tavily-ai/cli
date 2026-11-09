@@ -1,5 +1,6 @@
 import path from "node:path";
 import {
+  keylessLimitErrorFromEnvelope,
   type TavilyContinuationPath,
   TavilyKeylessLimitError,
   TavilyRequestError,
@@ -71,6 +72,19 @@ test("limit statuses 429 and 432 print the upgrade block and exit 3", () => {
   const limit = new TavilyRequestError({ status: 432, body: null, message: "m" });
   expect(exitCode(() => handleApiError(limit, true))).toBe(3);
   expect(JSON.parse(io.stdout())).toEqual({ error: "m" });
+});
+
+test("auth statuses 401 and 403 keep the API message and exit 3", () => {
+  const message = "Unauthorized: missing or invalid API key.";
+  for (const status of [401, 403]) {
+    const e = new TavilyRequestError({ status, body: null, message });
+    const before = io.stderr().length;
+    expect(exitCode(() => handleApiError(e, false))).toBe(3);
+    expect(visible(io.stderr().slice(before))).toBe(`  > Error: ${message}\n`);
+  }
+  const e = new TavilyRequestError({ status: 401, body: null, message });
+  expect(exitCode(() => handleApiError(e, true))).toBe(3);
+  expect(JSON.parse(io.stdout())).toEqual({ error: message });
 });
 
 test("keylessCapError maps SDK fields, including window, in the Python key order", () => {
@@ -242,7 +256,7 @@ describe("keyless cap rendering", () => {
       "",
       "Continuation options:",
       "  - Sign up for a Tavily API key:  https://tavily.com",
-      "  - Pay via x402 agentic payment:  TBD",
+      "  - Pay via x402 agentic payment",
     ]);
     const bonus = formatKeylessEnvelopeForTerminal(
       capHit({
@@ -251,5 +265,40 @@ describe("keyless cap rendering", () => {
     );
     expect(bonus).toContain("  - Earn bonus credits by answering 1 question:");
     expect(bonus).toContain("    POST your answers to: /v1/keyless/bonus");
+  });
+
+  test("production envelope renders each resource and instruction", () => {
+    const block = formatKeylessEnvelopeForTerminal(
+      keylessLimitErrorFromEnvelope({
+        error: {
+          code: "daily_cap_reached",
+          message: "...",
+          window: "day",
+          retry_after_seconds: 480,
+          next_actions: [
+            {
+              type: "agentic_payment",
+              resource: "https://docs.tavily.com/documentation/machine-payments/x402",
+              instruction:
+                "Pay for this request using the x402 agentic payment protocol to continue immediately.",
+            },
+            {
+              type: "signup",
+              resource: "https://tavily.com",
+              instruction:
+                "Ask the user to sign up at tavily.com and retry with the API key in the Authorization header as: Bearer tvly-YOUR_API_KEY",
+            },
+          ],
+        },
+      }),
+    );
+    expect(block.split("\n").slice(-5)).toEqual([
+      "Continuation options:",
+      "  - Sign up for a Tavily API key:  https://tavily.com",
+      "      Ask the user to sign up at tavily.com and retry with the API key in the Authorization header as: Bearer tvly-YOUR_API_KEY",
+      "  - Pay via x402 agentic payment:  https://docs.tavily.com/documentation/machine-payments/x402",
+      "      Pay for this request using the x402 agentic payment protocol to continue immediately.",
+    ]);
+    expect(block).not.toContain("TBD");
   });
 });

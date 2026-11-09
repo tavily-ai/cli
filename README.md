@@ -399,7 +399,7 @@ tvly --status --json   # structured status
 | 3 | Authentication failure, keyless rate-limit cap, or handled API usage/plan limit |
 | 4 | API error, setup live-search failure, or update-check error |
 
-HTTP 429 and 432 exit 3 on every credential type.
+HTTP 401, 403, 429, and 432 exit 3 on every credential type.
 
 ## Command Reference
 
@@ -502,7 +502,7 @@ automation can distinguish an available release from a supported self-update.
 | `--max-breadth` | Links per page (default: 20) |
 | `--limit` | Total pages cap (default: 50) |
 | `--instructions` | Natural language guidance |
-| `--chunks-per-source` | Chunks per page (1-5, requires `--instructions`) |
+| `--chunks-per-source` | Chunks per page (1-5) |
 | `--extract-depth` | `basic` or `advanced` |
 | `--format` | `markdown` or `text` |
 | `--select-paths` | Regex patterns for paths to include |

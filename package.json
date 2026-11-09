@@ -44,5 +44,8 @@
   },
   "bugs": {
     "url": "https://github.com/tavily-ai/cli/issues"
+  },
+  "overrides": {
+    "zod": "^4.6.6"
   }
 }

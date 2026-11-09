@@ -191,6 +191,20 @@ test("multi-query where every query hits the cap exits 3 and mentions tvly login
   expect(io.stdout() + io.stderr()).toContain("tvly login");
 });
 
+test("multi-query cap hit prints the cap message once to stderr and nothing to stdout", async () => {
+  setTerminalOverride(false);
+  const client = stubClient({
+    search: async (body) => {
+      if (body.query === "first") throw capError();
+      return { query: body.query, results: [] };
+    },
+  });
+  expect(await runProgram(["search", "first", "second", "third"], client)).toBe(3);
+  expect(io.stdout()).toBe("");
+  expect(io.stderr().match(/Keyless limit reached/g)).toHaveLength(1);
+  expect(io.stderr()).toContain("tvly login");
+});
+
 test("multi-query where every query hits a plan limit (432) exits 3", async () => {
   const client = stubClient({
     search: async () => {

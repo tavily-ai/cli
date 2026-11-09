@@ -11,12 +11,15 @@ import { handleOauthRefreshError } from "./common.js";
 
 // Status codes that represent usage/plan limits rather than real errors.
 export const LIMIT_STATUSES: ReadonlySet<number> = new Set([429, 432]);
+// Rejected credentials: exit 3 like the limits, but print the API's message as a plain error.
+const AUTH_STATUSES: ReadonlySet<number> = new Set([401, 403]);
 
 export function handleApiError(e: unknown, json: boolean): never {
   const limit = e instanceof TavilyRequestError && LIMIT_STATUSES.has(e.status);
+  const code = limit || (e instanceof TavilyRequestError && AUTH_STATUSES.has(e.status)) ? 3 : 4;
   if (json) {
     out(JSON.stringify({ error: messageOf(e) }));
-    throw new ExitError(limit ? 3 : 4);
+    throw new ExitError(code);
   }
   const text = sanitizeControl(messageOf(e));
   if (limit) {
@@ -31,7 +34,7 @@ export function handleApiError(e: unknown, json: boolean): never {
     throw new ExitError(3);
   }
   err(`  ${colors.pink("> Error:")} ${text}`);
-  throw new ExitError(4);
+  throw new ExitError(code);
 }
 
 /** Run a command body, turning keyless cap, OAuth refresh, and API failures into exit codes. */

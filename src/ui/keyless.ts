@@ -79,13 +79,15 @@ export function formatKeylessEnvelopeForTerminal(
     lines.push("", "Continuation options:");
     if (signup) {
       lines.push(
-        `  - Sign up for a Tavily API key:  ${orDefault(signup.url, "https://tavily.com")}`,
+        `  - Sign up for a Tavily API key:  ${orDefault(signup.resource ?? signup.url, "https://tavily.com")}`,
       );
+      if (signup.instruction) lines.push(`      ${signup.instruction}`);
     }
     if (payment) {
-      lines.push(
-        `  - Pay via ${orDefault(payment.scheme, "x402")} agentic payment:  ${orDefault(payment.details, "TBD")}`,
-      );
+      const label = `  - Pay via ${orDefault(payment.scheme, "x402")} agentic payment`;
+      const resource = payment.resource ?? payment.details;
+      lines.push(resource ? `${label}:  ${resource}` : label);
+      if (payment.instruction) lines.push(`      ${payment.instruction}`);
     }
     if (bonus) {
       const questions = Array.isArray(bonus.questions) ? bonus.questions : [];

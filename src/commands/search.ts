@@ -82,9 +82,13 @@ export async function run(args: string[], opts: SearchOptions, cmd: Command): Pr
       }),
     ),
   );
-  await printMultiSearchResults(responses, { json, outputFile, maxChars });
   const [firstCap] = capHits;
-  if (firstCap && !json) printKeylessCapHit(firstCap);
+  // The cap applies to every query: say so once instead of once per query.
+  if (firstCap && !json) {
+    printKeylessCapHit(firstCap);
+    throw new ExitError(3);
+  }
+  await printMultiSearchResults(responses, { json, outputFile, maxChars });
   // Usage limits exit 3 on every credential type, as a single query does.
   if (responses.every((r) => "error" in r)) {
     throw new ExitError(capHits.length > 0 || limitHit ? 3 : 4);
