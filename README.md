@@ -398,7 +398,7 @@ tvly --status --json   # structured status
 | 3 | Authentication failure, keyless rate-limit cap, or handled API usage/plan limit |
 | 4 | API error, setup live-search failure, or update-check error |
 
-HTTP 429 and 432 exit 3 on every credential type.
+HTTP 401, 403, 429, and 432 exit 3 on every credential type.
 
 ## Command Reference
 

@@ -73,6 +73,19 @@ test("limit statuses 429 and 432 print the upgrade block and exit 3", () => {
   expect(JSON.parse(io.stdout())).toEqual({ error: "m" });
 });
 
+test("auth statuses 401 and 403 keep the API message and exit 3", () => {
+  const message = "Unauthorized: missing or invalid API key.";
+  for (const status of [401, 403]) {
+    const e = new TavilyRequestError({ status, body: null, message });
+    const before = io.stderr().length;
+    expect(exitCode(() => handleApiError(e, false))).toBe(3);
+    expect(visible(io.stderr().slice(before))).toBe(`  > Error: ${message}\n`);
+  }
+  const e = new TavilyRequestError({ status: 401, body: null, message });
+  expect(exitCode(() => handleApiError(e, true))).toBe(3);
+  expect(JSON.parse(io.stdout())).toEqual({ error: message });
+});
+
 test("keylessCapError maps SDK fields, including window, in the Python key order", () => {
   const payload = keylessCapError(capError());
   expect(Object.keys(payload)).toEqual([
