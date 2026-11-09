@@ -1,5 +1,6 @@
 import path from "node:path";
 import {
+  keylessLimitErrorFromEnvelope,
   type TavilyContinuationPath,
   TavilyKeylessLimitError,
   TavilyRequestError,
@@ -255,7 +256,7 @@ describe("keyless cap rendering", () => {
       "",
       "Continuation options:",
       "  - Sign up for a Tavily API key:  https://tavily.com",
-      "  - Pay via x402 agentic payment:  TBD",
+      "  - Pay via x402 agentic payment",
     ]);
     const bonus = formatKeylessEnvelopeForTerminal(
       capHit({
@@ -264,5 +265,40 @@ describe("keyless cap rendering", () => {
     );
     expect(bonus).toContain("  - Earn bonus credits by answering 1 question:");
     expect(bonus).toContain("    POST your answers to: /v1/keyless/bonus");
+  });
+
+  test("production envelope renders each resource and instruction", () => {
+    const block = formatKeylessEnvelopeForTerminal(
+      keylessLimitErrorFromEnvelope({
+        error: {
+          code: "daily_cap_reached",
+          message: "...",
+          window: "day",
+          retry_after_seconds: 480,
+          next_actions: [
+            {
+              type: "agentic_payment",
+              resource: "https://docs.tavily.com/documentation/machine-payments/x402",
+              instruction:
+                "Pay for this request using the x402 agentic payment protocol to continue immediately.",
+            },
+            {
+              type: "signup",
+              resource: "https://tavily.com",
+              instruction:
+                "Ask the user to sign up at tavily.com and retry with the API key in the Authorization header as: Bearer tvly-YOUR_API_KEY",
+            },
+          ],
+        },
+      }),
+    );
+    expect(block.split("\n").slice(-5)).toEqual([
+      "Continuation options:",
+      "  - Sign up for a Tavily API key:  https://tavily.com",
+      "      Ask the user to sign up at tavily.com and retry with the API key in the Authorization header as: Bearer tvly-YOUR_API_KEY",
+      "  - Pay via x402 agentic payment:  https://docs.tavily.com/documentation/machine-payments/x402",
+      "      Pay for this request using the x402 agentic payment protocol to continue immediately.",
+    ]);
+    expect(block).not.toContain("TBD");
   });
 });
