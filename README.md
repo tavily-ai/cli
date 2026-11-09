@@ -500,7 +500,7 @@ automation can distinguish an available release from a supported self-update.
 | `--max-breadth` | Links per page (default: 20) |
 | `--limit` | Total pages cap (default: 50) |
 | `--instructions` | Natural language guidance |
-| `--chunks-per-source` | Chunks per page (1-5, requires `--instructions`) |
+| `--chunks-per-source` | Chunks per page (1-5) |
 | `--extract-depth` | `basic` or `advanced` |
 | `--format` | `markdown` or `text` |
 | `--select-paths` | Regex patterns for paths to include |
