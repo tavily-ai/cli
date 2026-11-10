@@ -169,29 +169,26 @@ test("a prompt inside a command owns stdin; its answer is not replayed as a REPL
   expect(text).toContain("Goodbye!");
 });
 
-describe("splitShellWords", () => {
-  test("splits on whitespace and groups double quotes", () => {
-    expect(splitShellWords('search "two words" --max-results 3')).toEqual([
-      "search",
-      "two words",
-      "--max-results",
-      "3",
-    ]);
-  });
-
-  test("single quotes keep backslashes literally", () => {
-    expect(splitShellWords("echo 'a\\nb'")).toEqual(["echo", "a\\nb"]);
-  });
-
-  test("backslash outside quotes escapes the next character", () => {
-    expect(splitShellWords("a\\ b")).toEqual(["a b"]);
-  });
-
-  test("double quotes only escape quote and backslash (shlex posix)", () => {
-    expect(splitShellWords('"a\\"b\\\\c\\$d\\`e\\nf"')).toEqual(['a"b\\c\\$d\\`e\\nf']);
-  });
-
-  test("adjacent quoted segments join and empty quotes yield an empty word", () => {
-    expect(splitShellWords("a\"b\"'c' ''")).toEqual(["abc", ""]);
+describe("splitShellWords (shlex posix)", () => {
+  test.each([
+    [
+      "groups double quotes",
+      'search "two words" --max-results 3',
+      ["search", "two words", "--max-results", "3"],
+    ],
+    ["single quotes keep backslashes literally", "echo 'a\\nb'", ["echo", "a\\nb"]],
+    ["a backslash outside quotes escapes the next character", "a\\ b", ["a b"]],
+    [
+      "double quotes only escape quote and backslash",
+      '"a\\"b\\\\c\\$d\\`e\\nf"',
+      ['a"b\\c\\$d\\`e\\nf'],
+    ],
+    [
+      "adjacent quoted segments join; empty quotes yield an empty word",
+      "a\"b\"'c' ''",
+      ["abc", ""],
+    ],
+  ])("%s", (_name, input, expected) => {
+    expect(splitShellWords(input)).toEqual(expected);
   });
 });

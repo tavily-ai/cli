@@ -397,11 +397,8 @@ describe("semver", () => {
     expect(compareVersions("1.2.3", "1.2.3")).toBe(0);
   });
 
-  test("release ranks above its prerelease", () => {
+  test("a release ranks above its prerelease; prerelease identifiers compare per identifier", () => {
     expect(compareVersions("1.0.0", "1.0.0-rc.1")).toBe(1);
-  });
-
-  test("prerelease identifiers compare per identifier", () => {
     expect(compareVersions("1.0.0-rc.2", "1.0.0-rc.1")).toBe(1);
     expect(compareVersions("1.0.0-rc.10", "1.0.0-rc.9")).toBe(1);
     expect(compareVersions("1.0.0-1", "1.0.0-alpha")).toBe(-1);

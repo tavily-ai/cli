@@ -168,22 +168,12 @@ describe("login", () => {
     expect(io.stderr()).not.toContain("\x07");
   });
 
-  test("--api-key --json saves the key even when revoking the old oauth fails", async () => {
+  test("--api-key --json saves the key, even when revoking the old oauth fails", async () => {
     writeConfig({ oauth: storedOauth });
-    const code = await runAuthProgram(["--json", "login", "--api-key", "tvly-replacement"], {
-      home,
-      env: {},
-      fetchImpl: fetchWith(500),
-    });
-    expect(code).toBe(0);
-    expect(stdoutJson().authenticated).toBe(true);
-    expect(readConfig({ home, env: {} })).toEqual({ api_key: "tvly-replacement" });
-  });
-
-  test("--api-key --json saves the key", async () => {
     const code = await runAuthProgram(["--json", "login", "--api-key", "tvly-new"], {
       home,
       env: {},
+      fetchImpl: fetchWith(500),
     });
     expect(code).toBe(0);
     expect(stdoutJson()).toEqual({
@@ -191,7 +181,7 @@ describe("login", () => {
       method: "api_key",
       detail: `Saved to ${configPaths(home).file}`,
     });
-    expect(readConfig({ home, env: {} })).toHaveProperty("api_key", "tvly-new");
+    expect(readConfig({ home, env: {} })).toEqual({ api_key: "tvly-new" });
   });
 
   test("oauth --json reports replacement revocation failure", async () => {

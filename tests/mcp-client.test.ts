@@ -159,12 +159,6 @@ test("a body with no data lines is parsed as plain JSON", async () => {
   await expect(make("not json").c.search({})).rejects.toThrow("Unexpected MCP response: not json");
 });
 
-test("a plain JSON reply is unwrapped like the SSE form", async () => {
-  const data = { result: { structuredContent: { ok: 1 } } };
-  expect(await make(JSON.stringify(data)).c.search({})).toEqual({ ok: 1 });
-  expect(await make(sse(data)).c.search({})).toEqual({ ok: 1 });
-});
-
 test("non-2xx throws TavilyRequestError with status and body", async () => {
   const err = await make("nope", 401)
     .c.search({})

@@ -180,17 +180,6 @@ test("multi-query keeps keyless cap details", async () => {
   ]);
 });
 
-test("multi-query where every query hits the cap exits 3 and mentions tvly login", async () => {
-  setTerminalOverride(false);
-  const client = stubClient({
-    search: async () => {
-      throw capError();
-    },
-  });
-  expect(await runProgram(["search", "capped", "capped"], client)).toBe(3);
-  expect(io.stdout() + io.stderr()).toContain("tvly login");
-});
-
 test("multi-query cap hit prints the cap message once to stderr and nothing to stdout", async () => {
   setTerminalOverride(false);
   const client = stubClient({
@@ -205,29 +194,24 @@ test("multi-query cap hit prints the cap message once to stderr and nothing to s
   expect(io.stderr()).toContain("tvly login");
 });
 
-test("multi-query where every query hits a plan limit (432) exits 3", async () => {
+test.each([
+  [
+    "a plan limit (432)",
+    () => new TavilyRequestError({ status: 432, body: null, message: "Plan limit exceeded" }),
+    3,
+    "Plan limit exceeded",
+  ],
+  ["another error", () => new Error("boom"), 4, "boom"],
+])("multi-query where every query hits %s exits %i", async (_name, error, code, message) => {
   const client = stubClient({
     search: async () => {
-      throw new TavilyRequestError({ status: 432, body: null, message: "Plan limit exceeded" });
+      throw error();
     },
   });
-  expect(await runProgram(["search", "a", "b", "--json"], client)).toBe(3);
+  expect(await runProgram(["search", "a", "b", "--json"], client)).toBe(code);
   expect(JSON.parse(io.stdout())).toEqual([
-    { query: "a", error: "Plan limit exceeded" },
-    { query: "b", error: "Plan limit exceeded" },
-  ]);
-});
-
-test("multi-query where every query fails otherwise exits 4", async () => {
-  const client = stubClient({
-    search: async () => {
-      throw new Error("boom");
-    },
-  });
-  expect(await runProgram(["search", "a", "b", "--json"], client)).toBe(4);
-  expect(JSON.parse(io.stdout())).toEqual([
-    { query: "a", error: "boom" },
-    { query: "b", error: "boom" },
+    { query: "a", error: message },
+    { query: "b", error: message },
   ]);
 });
 
@@ -340,7 +324,7 @@ describe("search flag specs", () => {
     expect(specs.map((s) => s.key).sort()).toEqual(keys.sort());
   });
 
-  test("maxResults is --max-results <n> and enforces the catalog bounds", () => {
+  test("integer flags enforce the catalog bounds; number flags accept fractions", () => {
     const s = spec("maxResults");
     expect(s.flags).toBe("--max-results <n>");
     expect(s.parse("3")).toBe(3);
@@ -348,9 +332,6 @@ describe("search flag specs", () => {
     expect(() => s.parse("-1")).toThrow(/minimum 0/);
     expect(() => s.parse("2.5")).toThrow();
     expect(() => s.parse("abc")).toThrow();
-  });
-
-  test("number flags accept fractions", () => {
     expect(spec("days").parse("1.5")).toBe(1.5);
   });
 
