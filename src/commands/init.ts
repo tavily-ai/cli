@@ -19,6 +19,7 @@ import {
   MANAGER_COMMANDS,
   MANAGER_RUNNERS,
 } from "../core/install-detect.js";
+import { installMcp, MCP_AUTH_NOTE, type McpSetupResult } from "../core/mcp-setup.js";
 import { looksHeadless, runBrowserLogin } from "../core/oauth.js";
 import {
   detectAgents,
@@ -39,9 +40,10 @@ export interface InitDeps extends ConfigOptions {
   login?: typeof runBrowserLogin;
   openImpl?: (url: string) => void;
   installSkills?: (repo: string, agents: string[]) => Promise<SkillsInstallResult>;
+  installMcp?: typeof installMcp;
   which?: (name: string) => string | null;
   stdinIsTTY?: boolean;
-  confirm?: (question: string) => Promise<boolean>;
+  confirm?: (question: string, defaultYes?: boolean) => Promise<boolean>;
   client?: TavilyClientLike;
   spawnImpl?: typeof spawnSync;
   platform?: NodeJS.Platform;
@@ -66,6 +68,7 @@ interface InitResult {
   auth: { authenticated: boolean; method: string };
   skills: { source: string; agents: string[]; restart_required: boolean; skipped: boolean };
   workflows: { source: string; agents: string[]; restart_required: boolean; skipped: boolean };
+  mcp: { agents: string[]; skipped: boolean };
   verification: { cli: boolean; auth: boolean; live_search: boolean };
   install: { global: boolean; manager: string | null; on_path: boolean; path_updated: boolean };
   error?: { stage: string; message: string };
@@ -82,9 +85,10 @@ export async function run(opts: InitOptions, cmd: Command, deps: InitDeps = {}):
   const which = deps.which ?? defaultWhich(deps.env ?? process.env);
   const step = await installStep(opts, json, which, deps);
 
-  const { agents, skills, workflows } = await selectAgents(requested, opts, json, deps);
+  const { agents, skills, workflows, mcp } = await selectAgents(requested, opts, json, deps);
   const result = emptyResult(skills ? agents : [], workflows ? agents : []);
   result.install = step.install;
+  let mcpSetup: McpSetupResult | null = null;
 
   try {
     const auth = await ensureAuth(opts, deps);
@@ -103,6 +107,14 @@ export async function run(opts: InitOptions, cmd: Command, deps: InitDeps = {}):
       part.restart_required = (await install(part.source, part.agents)).restartRequired;
     } catch (e) {
       return fail(result, stage, messageOf(e), 1, json);
+    }
+  }
+  if (mcp) {
+    try {
+      mcpSetup = await (deps.installMcp ?? installMcp)(agents, { keyless: false, ...deps });
+      result.mcp = { agents: mcpSetup.configured, skipped: mcpSetup.configured.length === 0 };
+    } catch (e) {
+      return fail(result, "mcp", messageOf(e), 1, json);
     }
   }
 
@@ -124,7 +136,7 @@ export async function run(opts: InitOptions, cmd: Command, deps: InitDeps = {}):
     return fail(result, "install", INSTALL_INCOMPLETE, 1, json, step.pathNote);
   }
   result.ok = true;
-  printResult(result, json, step.pathNote);
+  printResult(result, json, step.pathNote, mcpSetup);
 }
 
 const INSTALL_INCOMPLETE =
@@ -249,19 +261,28 @@ async function selectAgents(
   opts: InitOptions,
   json: boolean,
   deps: InitDeps,
-): Promise<{ agents: string[]; skills: boolean; workflows: boolean }> {
-  if (opts.skipSkills) return { agents: [], skills: false, workflows: false };
+): Promise<{ agents: string[]; skills: boolean; workflows: boolean; mcp: boolean }> {
   const agents: string[] = requested.length ? requested : detectAgents(deps);
 
   const isTTY = deps.stdinIsTTY ?? process.stdin.isTTY === true;
-  const ask = !requested.length && agents.length > 0 && !opts.all && !opts.yes && !json && isTTY;
+  const interactive = agents.length > 0 && !opts.yes && !json && isTTY;
+  const ask = interactive && !requested.length && !opts.all;
   const confirm = deps.confirm ?? promptConfirm;
   const skills =
-    !ask || (await confirm(`Install Tavily skills for detected agents (${agents.join(", ")})?`));
+    !opts.skipSkills &&
+    (!ask || (await confirm(`Install Tavily skills for detected agents (${agents.join(", ")})?`)));
   const workflows =
+    !opts.skipSkills &&
     !opts.skipWorkflows &&
     (!ask || (await confirm(`Install the Tavily official workflows (${WORKFLOWS_REPO})?`)));
-  return { agents, skills, workflows };
+  // MCP is opt-in: only an explicit yes at the prompt configures it.
+  const mcp =
+    interactive &&
+    (await confirm(
+      `Add the Tavily MCP server to ${agents.join(", ")} (hosted, signs in with OAuth)?`,
+      false,
+    ));
+  return { agents, skills, workflows, mcp };
 }
 
 async function ensureAuth(
@@ -315,6 +336,7 @@ function emptyResult(skillsAgents: string[], workflowsAgents: string[]): InitRes
       restart_required: false,
       skipped: workflowsAgents.length === 0,
     },
+    mcp: { agents: [], skipped: true },
     verification: { cli: false, auth: false, live_search: false },
     install: { global: false, manager: null, on_path: false, path_updated: false },
   };
@@ -333,7 +355,12 @@ function fail(
   throw new ExitError(code);
 }
 
-function printResult(result: InitResult, json: boolean, pathNote: string | null = null): void {
+function printResult(
+  result: InitResult,
+  json: boolean,
+  pathNote: string | null = null,
+  mcp: McpSetupResult | null = null,
+): void {
   if (json) {
     out(JSON.stringify(result));
     return;
@@ -355,6 +382,14 @@ function printResult(result: InitResult, json: boolean, pathNote: string | null 
   else out(`    ${colors.green("✓")} Tavily skills ready for ${skills.agents.join(", ")}`);
   if (workflows.skipped) out(`    ${colors.dim("• Workflows skipped")}`);
   else out(`    ${colors.green("✓")} Tavily workflows ready for ${workflows.agents.join(", ")}`);
+  if (mcp) {
+    if (mcp.configured.length) {
+      out(`    ${colors.green("✓")} Tavily MCP server ready for ${mcp.configured.join(", ")}`);
+    }
+    for (const { agent, reason } of mcp.skipped) {
+      out(`    ${colors.dim(`• MCP skipped for ${agent} (${sanitizeControl(reason)})`)}`);
+    }
+  }
   out(`    ${colors.green("✓")} Live search verified`);
   if (result.install.global) {
     out(`    ${colors.green("✓")} tvly installed globally (${result.install.manager})`);
@@ -366,11 +401,20 @@ function printResult(result: InitResult, json: boolean, pathNote: string | null 
     out();
     out(`    ${colors.dim(`Restart ${restart.join(", ")} to load newly installed skills.`)}`);
   }
+  if (mcp?.configured.length) {
+    out();
+    out(`    ${colors.dim(MCP_AUTH_NOTE[mcp.auth])}`);
+  }
 
   out();
   out("  Try:");
   out(`    ${colors.green('tvly search "latest AI news"')}`);
   out(`    ${colors.green("tvly extract https://example.com")}`);
   out(`    ${colors.green('tvly research "your topic"')}`);
+  if (result.mcp.skipped) {
+    out();
+    out("  Add the hosted Tavily MCP server to your agents:");
+    out(`    ${colors.green("tvly setup mcp")}`);
+  }
   out();
 }

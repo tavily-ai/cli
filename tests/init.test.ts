@@ -163,8 +163,12 @@ describe("init workflows", () => {
 
   function setup(answers: { skills?: boolean; workflows?: boolean } = {}) {
     mkdirSync(join(home, ".codex"));
-    const confirm = vi.fn(async (question: string) =>
-      question === WORKFLOWS_QUESTION ? (answers.workflows ?? true) : (answers.skills ?? true),
+    const confirm = vi.fn(async (question: string, defaultYes?: boolean) =>
+      defaultYes === false
+        ? false
+        : question === WORKFLOWS_QUESTION
+          ? (answers.workflows ?? true)
+          : (answers.skills ?? true),
     );
     const installSkills = vi.fn(async (_repo: string, agents: string[]) => ({
       agents,
@@ -249,6 +253,56 @@ describe("init workflows", () => {
     });
     expect(await runInit(["--yes", "--json"], deps)).toBe(1);
     expect(stdoutJson().error).toEqual({ stage: "workflows", message: "npx skills failed: boom" });
+  });
+});
+
+describe("init mcp", () => {
+  const MCP_QUESTION = "Add the Tavily MCP server to codex (hosted, signs in with OAuth)?";
+
+  function setup(answer: boolean) {
+    mkdirSync(join(home, ".codex"));
+    const confirm = vi.fn(async (question: string) => question === MCP_QUESTION && answer);
+    const installMcp = vi.fn(async (agents: string[]) => ({
+      configured: agents,
+      skipped: [],
+      auth: "oauth" as const,
+    }));
+    const deps: InitDeps = {
+      home,
+      env: { TAVILY_API_KEY: "tvly-test" },
+      which: () => "/usr/bin/tvly",
+      client: okClient,
+      stdinIsTTY: true,
+      confirm,
+      installSkills: async (_repo, agents) => ({ agents, restartRequired: false }),
+      installMcp,
+    };
+    return { deps, confirm, installMcp };
+  }
+
+  test("the prompt defaults to no, which leaves MCP alone and hints at setup mcp", async () => {
+    const { deps, confirm, installMcp } = setup(false);
+    expect(await runInit([], deps)).toBe(0);
+    expect(confirm).toHaveBeenCalledWith(MCP_QUESTION, false);
+    expect(installMcp).not.toHaveBeenCalled();
+    expect(io.stdout()).toContain("tvly setup mcp");
+  });
+
+  test("accepting the prompt configures MCP, even with --skip-skills", async () => {
+    const { deps, installMcp } = setup(true);
+    expect(await runInit(["--skip-skills"], deps)).toBe(0);
+    expect(installMcp).toHaveBeenCalledWith(["codex"], expect.objectContaining({ keyless: false }));
+    expect(io.stdout()).toContain("Tavily MCP server ready for codex");
+    expect(io.stdout()).toContain("open a browser to sign in to Tavily");
+    expect(io.stdout()).not.toContain("tvly setup mcp");
+  });
+
+  test("--yes never configures MCP", async () => {
+    const { deps, confirm, installMcp } = setup(true);
+    expect(await runInit(["--yes", "--json"], deps)).toBe(0);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(installMcp).not.toHaveBeenCalled();
+    expect(stdoutJson().mcp).toEqual({ agents: [], skipped: true });
   });
 });
 

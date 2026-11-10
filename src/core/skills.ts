@@ -3,18 +3,21 @@
  *
  * Installs track the latest published skills and are counted on skills.sh.
  */
+
+import type { SpawnSyncReturns } from "node:child_process";
 import * as childProcess from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { runManager, type SpawnFn, whichOnPath } from "../util/process.js";
+import { failureOf, runManager, type SpawnFn, whichOnPath } from "../util/process.js";
 import type { AGENT_NAMES } from "./agent-names.js";
 
 export const SKILLS_REPO = "tavily-ai/skills";
 export const WORKFLOWS_REPO = "tavily-ai/official-workflows";
-// Exact version: npx runs whatever this resolves to with the user's permissions.
+// Exact versions: npx runs whatever these resolve to with the user's permissions.
 const NPX_SKILLS_PACKAGE = "skills@1.7.4";
+export const NPX_ADD_MCP_PACKAGE = "add-mcp@1.14.0";
 
 export type AgentName = (typeof AGENT_NAMES)[number];
 
@@ -62,21 +65,31 @@ export function detectAgents(opts: SkillsOptions = {}): AgentName[] {
     .map(([name]) => name);
 }
 
+/**
+ * Run npx with `args`, without a shell where possible so the arguments reach the package as
+ * given. Null when npx is not on PATH.
+ */
+export function runNpx(args: string[], deps: SkillsDeps): SpawnSyncReturns<string | Buffer> | null {
+  const which = deps.which ?? ((name: string) => whichOnPath(name, deps.env));
+  const npx = which("npx");
+  if (!npx) return null;
+  const spawnImpl = deps.spawnImpl ?? childProcess.spawnSync;
+  // Windows: spawning a .cmd with shell:false throws EINVAL on Node 20.12.2+,
+  // so run npm's npx-cli.js through node; fall back to the shell for the .cmd.
+  const win = (deps.platform ?? process.platform) === "win32";
+  const execPath = deps.execPath ?? process.execPath;
+  const npxCli = path.join(path.dirname(execPath), "node_modules", "npm", "bin", "npx-cli.js");
+  return win && (deps.existsSync ?? existsSync)(npxCli)
+    ? runManager(spawnImpl, execPath, [npxCli, ...args], false)
+    : runManager(spawnImpl, npx, args, win);
+}
+
 /** Install every skill in a skills repo (Tavily skills or workflows) for the selected agents. */
 export async function installAgentSkills(
   repo: string,
   agents: string[],
   deps: SkillsDeps = {},
 ): Promise<SkillsInstallResult> {
-  const which = deps.which ?? ((name: string) => whichOnPath(name, deps.env));
-  const spawnImpl = deps.spawnImpl ?? childProcess.spawnSync;
-  const npx = which("npx");
-  if (!npx) {
-    throw new Error(
-      "Installing Tavily skills requires Node.js (npx). Install Node.js, or rerun with --skip-skills.",
-    );
-  }
-
   // npx writes to the shared directory, or straight into an agent's own
   // directory when that agent is the only target.
   const roots = agentRoots(deps) as Record<string, string>;
@@ -100,31 +113,14 @@ export async function installAgentSkills(
     ...agents,
     "--yes",
   ];
-  // Windows: spawning a .cmd with shell:false throws EINVAL on Node 20.12.2+,
-  // so run npm's npx-cli.js through node; fall back to the shell for the .cmd.
-  const win = (deps.platform ?? process.platform) === "win32";
-  const execPath = deps.execPath ?? process.execPath;
-  const npxCli = path.join(path.dirname(execPath), "node_modules", "npm", "bin", "npx-cli.js");
-  const completed =
-    win && (deps.existsSync ?? existsSync)(npxCli)
-      ? runManager(spawnImpl, execPath, [npxCli, ...args], false)
-      : runManager(spawnImpl, npx, args, win);
-  if (completed.error) {
-    if ((completed.error as NodeJS.ErrnoException).code === "ETIMEDOUT") {
-      throw new Error("npx skills timed out while installing Tavily skills.");
-    }
-    throw new Error(`npx skills failed: ${completed.error.message}`);
+  const completed = runNpx(args, deps);
+  if (!completed) {
+    throw new Error(
+      "Installing Tavily skills requires Node.js (npx). Install Node.js, or rerun with --skip-skills.",
+    );
   }
-  if (completed.status !== 0) {
-    const text = String(completed.stderr || completed.stdout || "").trim();
-    const last = text
-      .split(/\r?\n/)
-      .filter((line) => line.trim())
-      .pop();
-    const fallback =
-      completed.status === null ? `signal ${completed.signal}` : `exit code ${completed.status}`;
-    throw new Error(`npx skills failed: ${last ?? fallback}`);
-  }
+  const failure = failureOf(completed);
+  if (failure) throw new Error(`npx skills failed: ${failure}`);
 
   return { agents, restartRequired: !isDeepStrictEqual(snapshotSkills(skillDirs), before) };
 }

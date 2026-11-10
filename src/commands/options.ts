@@ -47,12 +47,14 @@ export function parseNumberArg(
   return n;
 }
 
-/** Ask `question [Y/n]`; an empty answer means yes. */
-export async function promptConfirm(question: string): Promise<boolean> {
+/** Ask `question [Y/n]` (or `[y/N]` when `defaultYes` is false); an empty answer means the default. */
+export async function promptConfirm(question: string, defaultYes = true): Promise<boolean> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try {
-    const answer = (await rl.question(`${question} [Y/n]: `)).trim().toLowerCase();
-    return answer === "" || answer === "y" || answer === "yes";
+    const hint = defaultYes ? "[Y/n]" : "[y/N]";
+    const answer = (await rl.question(`${question} ${hint}: `)).trim().toLowerCase();
+    if (answer === "") return defaultYes;
+    return answer === "y" || answer === "yes";
   } finally {
     rl.close();
   }

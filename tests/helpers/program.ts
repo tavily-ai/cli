@@ -47,7 +47,8 @@ type Action = (...args: any[]) => void | Promise<void>;
 
 /**
  * Run the real command tree in-process with `client`, returning the exit code `cli.ts` would set.
- * `actions` replaces top-level command actions by name, for commands that take injected deps.
+ * `actions` replaces command actions by name (`"init"`, or `"setup mcp"` for a subcommand), for
+ * commands that take injected deps.
  */
 export async function runProgram(
   argv: string[],
@@ -58,8 +59,11 @@ export async function runProgram(
   fake.stdin = opts.stdin ?? "";
   const program = buildProgram();
   for (const sub of program.commands) {
-    const action = opts.actions?.[sub.name()];
-    if (action) sub.action(action);
+    for (const cmd of [sub, ...sub.commands]) {
+      const key = cmd === sub ? sub.name() : `${sub.name()} ${cmd.name()}`;
+      const action = opts.actions?.[key];
+      if (action) cmd.action(action);
+    }
   }
   try {
     await program.parseAsync(argv, { from: "user" });

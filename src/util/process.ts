@@ -45,3 +45,16 @@ export function runManager(
     shell,
   });
 }
+
+/** Why a `runManager` run failed: null on exit 0, else the last output line, signal, or spawn error. */
+export function failureOf(r: SpawnSyncReturns<string | Buffer>): string | null {
+  if (r.error) {
+    return (r.error as NodeJS.ErrnoException).code === "ETIMEDOUT" ? "timed out" : r.error.message;
+  }
+  if (r.status === 0) return null;
+  const last = String(r.stderr || r.stdout || "")
+    .split(/\r?\n/)
+    .filter((line) => line.trim())
+    .pop();
+  return last ?? (r.status === null ? `signal ${r.signal}` : `exit code ${r.status}`);
+}

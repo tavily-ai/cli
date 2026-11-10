@@ -9,6 +9,7 @@ import {
   resolveJson,
 } from "./commands/options.js";
 import type { PollOptions, RunOptions } from "./commands/research.js";
+import type { McpOptions } from "./commands/setup.js";
 import { AGENT_NAMES } from "./core/agent-names.js";
 import { out } from "./ui/theme.js";
 import { VERSION } from "./version.js";
@@ -50,19 +51,23 @@ export function buildProgram(): Command {
   const defaults = () => import("./commands/defaults.js");
   const research = () => import("./commands/research.js");
 
+  /** Repeatable, case-insensitive `--agent <name>` limited to `choices`. */
+  const agentOption = (description: string, choices: readonly string[]) =>
+    new Option("--agent <name>", description)
+      .choices(choices)
+      .argParser((value: string, previous: string[] | undefined) => {
+        const name = value.toLowerCase();
+        if (!choices.includes(name)) {
+          throw new InvalidArgumentError(`Allowed choices are ${choices.join(", ")}.`);
+        }
+        return [...(previous ?? []), name];
+      });
+
   program
     .command("init")
     .description("Authenticate, install Tavily skills, and verify a working CLI.")
     .addOption(
-      new Option("--agent <name>", "Install skills for an agent. Repeat to select more than one.")
-        .choices(AGENT_NAMES)
-        .argParser((value: string, previous: string[] | undefined) => {
-          const name = value.toLowerCase();
-          if (!(AGENT_NAMES as readonly string[]).includes(name)) {
-            throw new InvalidArgumentError(`Allowed choices are ${AGENT_NAMES.join(", ")}.`);
-          }
-          return [...(previous ?? []), name];
-        }),
+      agentOption("Install skills for an agent. Repeat to select more than one.", AGENT_NAMES),
     )
     .option("--all", "Install skills for every detected agent.")
     .option("--yes", "Accept detected agents and the global install without prompting.")
@@ -297,6 +302,22 @@ export function buildProgram(): Command {
   unsetDefault.action(async (opts: DefaultsOptions, cmd: Command) => {
     await (await defaults()).runUnsetDefault(opts, cmd);
   });
+
+  program
+    .command("setup")
+    .description("Configure coding agents to use Tavily (mcp).")
+    .command("mcp")
+    .description("Add the hosted Tavily MCP server to Claude Code, Codex, or Cursor.")
+    .addOption(
+      agentOption("Configure an agent, or all. Repeat to select more than one.", [
+        ...AGENT_NAMES,
+        "all",
+      ]),
+    )
+    .option("--keyless", "Sign in with OAuth even when TAVILY_API_KEY is set.")
+    .action(async (opts: McpOptions, cmd: Command) => {
+      await (await import("./commands/setup.js")).runMcp(opts, cmd);
+    });
 
   // Commander's built-in help command prints synchronously, before lazily added flags exist.
   program.helpCommand(false);
