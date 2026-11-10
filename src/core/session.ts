@@ -1,17 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
 import { isObject } from "../errors.js";
-import { type Exec, exec } from "../util/exec.js";
+import type { Host } from "../host.js";
 
 type Sessions = Record<string, string>;
-
-interface GrandparentOptions {
-  exec?: Exec;
-  platform?: NodeJS.Platform;
-  readFile?: (p: string) => string;
-}
 
 export interface ResolveOptions {
   configDir: string;
@@ -38,12 +31,13 @@ export function pidAlive(pid: number): boolean {
   }
 }
 
-export function grandparentPid(ppid: number, opts: GrandparentOptions = {}): number | null {
-  const platform = opts.platform ?? process.platform;
-  const x = opts.exec ?? exec;
-  const readFile = opts.readFile ?? ((p: string) => readFileSync(p, "utf8"));
+export function grandparentPid(
+  ppid: number,
+  host: Pick<Host, "exec" | "platform">,
+  readFile: (p: string) => string = (p) => readFileSync(p, "utf8"),
+): number | null {
   try {
-    if (platform === "linux") {
+    if (host.platform === "linux") {
       const stat = readFile(`/proc/${ppid}/stat`);
       // Fields after the ")" closing the command name: state, ppid, ...
       const fields = stat
@@ -53,7 +47,7 @@ export function grandparentPid(ppid: number, opts: GrandparentOptions = {}): num
       return parsePid(fields[1] ?? "");
     }
     const [cmd, args] =
-      platform === "win32"
+      host.platform === "win32"
         ? [
             "powershell",
             [
@@ -63,7 +57,7 @@ export function grandparentPid(ppid: number, opts: GrandparentOptions = {}): num
             ],
           ]
         : ["ps", ["-o", "ppid=", "-p", String(ppid)]];
-    const res = x.run(cmd as string, args as string[], { timeoutMs: 2000 });
+    const res = host.exec.run(cmd as string, args as string[], { timeoutMs: 2000 });
     return res.ok ? parsePid(res.stdout) : null;
   } catch {
     return null;
@@ -109,13 +103,13 @@ export function resolveSessionId(opts: ResolveOptions): string {
 
 let cached: string | undefined;
 
-export function getSessionId(): string {
+export function getSessionId(host: Pick<Host, "home" | "exec" | "platform">): string {
   if (cached === undefined) {
     try {
       cached = resolveSessionId({
-        configDir: path.join(homedir(), ".tavily"),
+        configDir: path.join(host.home, ".tavily"),
         ppid: process.ppid,
-        gppid: () => grandparentPid(process.ppid),
+        gppid: () => grandparentPid(process.ppid, host),
         pidAlive,
       });
     } catch {

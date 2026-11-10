@@ -9,8 +9,9 @@ import {
   unsetClaudeDefault,
   unsetCodexDefault,
 } from "../core/agent-defaults.js";
+import type { Host } from "../host.js";
 import { colors, out } from "../ui/theme.js";
-import { promptConfirm, resolveJson } from "./options.js";
+import { resolveJson } from "./options.js";
 
 type Agent = "claude" | "codex";
 
@@ -20,10 +21,7 @@ export interface DefaultsOptions {
   project?: boolean;
 }
 
-export interface DefaultsDeps extends Omit<PathContext, "project"> {
-  confirm?: (question: string) => Promise<boolean>;
-  isTTY?: boolean;
-}
+type DefaultsHost = Pick<Host, "home" | "env" | "cwd" | "stdinIsTTY" | "confirm">;
 
 interface Mode {
   verb: string;
@@ -58,19 +56,20 @@ async function selectTargets(
   mode: Mode,
   json: boolean,
   cmd: Command,
-  deps: DefaultsDeps,
+  host: DefaultsHost,
 ): Promise<Agent[]> {
   if (opts.claude || opts.codex) {
     return (["claude", "codex"] as const).filter((agent) => opts[agent]);
   }
-  if (json || !(deps.isTTY ?? process.stdin.isTTY)) {
+  if (json || !host.stdinIsTTY) {
     return cmd.error("error: Pass --claude and/or --codex in non-interactive runs.");
   }
-  const confirm = deps.confirm ?? promptConfirm;
   const selected: Agent[] = [];
   for (const agent of ["claude", "codex"] as const) {
     const scope = opts.project ? " in this project" : "";
-    if (await confirm(`${mode.verb} for ${TARGETS[agent].label}${scope}?`)) selected.push(agent);
+    if (await host.confirm(`${mode.verb} for ${TARGETS[agent].label}${scope}?`)) {
+      selected.push(agent);
+    }
   }
   return selected;
 }
@@ -78,18 +77,18 @@ async function selectTargets(
 async function execute(
   opts: DefaultsOptions,
   cmd: Command,
-  deps: DefaultsDeps,
+  host: DefaultsHost,
   mode: Mode,
 ): Promise<void> {
   const json = resolveJson(cmd);
   const project = opts.project === true;
-  const targets = await selectTargets(opts, mode, json, cmd, deps);
+  const targets = await selectTargets(opts, mode, json, cmd, host);
 
   const results = [];
   try {
     for (const agent of targets) {
       const { label, path: pathFor } = TARGETS[agent];
-      const path = pathFor({ ...deps, project });
+      const path = pathFor({ ...host, project });
       const changed = mode.actions[agent](path);
       results.push({ agent, label, scope: project ? "project" : "global", path, changed });
     }
@@ -122,11 +121,11 @@ async function execute(
 export const runSetDefault = (
   opts: DefaultsOptions,
   cmd: Command,
-  deps: DefaultsDeps = {},
-): Promise<void> => execute(opts, cmd, deps, SET);
+  host: DefaultsHost,
+): Promise<void> => execute(opts, cmd, host, SET);
 
 export const runUnsetDefault = (
   opts: DefaultsOptions,
   cmd: Command,
-  deps: DefaultsDeps = {},
-): Promise<void> => execute(opts, cmd, deps, UNSET);
+  host: DefaultsHost,
+): Promise<void> => execute(opts, cmd, host, UNSET);

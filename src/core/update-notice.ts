@@ -4,8 +4,8 @@
  * timer at the end, so it never delays the command and never installs anything.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
+import type { Host } from "../host.js";
 import { colors, err } from "../ui/theme.js";
 import { isNewer } from "../util/semver.js";
 import { VERSION } from "../version.js";
@@ -17,26 +17,12 @@ const SKIP_FLAGS = new Set(["--version", "--help", "-V", "-h"]);
 // Both already report the installed and latest versions themselves.
 const SKIP_COMMANDS = new Set(["update", "init"]);
 
-export interface UpdateNoticeDeps {
-  home?: string;
-  env?: NodeJS.ProcessEnv;
-  argv?: string[];
-  fetchImpl?: typeof fetch;
-  now?: () => number;
-  stderrIsTTY?: boolean;
-  currentVersion?: string;
-  installMethod?: () => string;
-}
-
 interface State {
   checked_at: number;
   latest: string | null;
 }
 
 const noop = async () => {};
-
-/** `/_npx/` is matched before any package-manager spawn, so skipping `npm root -g` keeps this cheap. */
-const defaultInstallMethod = () => detectInstall({ npmRootGlobal: () => null }).method;
 
 function readState(file: string): State | null {
   try {
@@ -62,27 +48,29 @@ function writeState(file: string, state: State): void {
  * Decide whether to check, start the registry request when the cached answer is older than a day,
  * and return `finish`, which prints the notice (if any) once the command's output is complete.
  */
-export function startUpdateCheck(deps: UpdateNoticeDeps = {}): () => Promise<void> {
+export function startUpdateCheck(
+  host: Pick<Host, "home" | "env" | "argv" | "fetch" | "now" | "stderrIsTTY" | "exec">,
+): () => Promise<void> {
   try {
-    const env = deps.env ?? process.env;
-    const args = (deps.argv ?? process.argv).slice(2);
+    const { env, now } = host;
+    const args = host.argv.slice(2);
     const command = args.find((a) => !a.startsWith("-")) ?? "";
     if (
       env.CI ||
       env.NO_UPDATE_NOTIFIER ||
-      !(deps.stderrIsTTY ?? process.stderr.isTTY === true) ||
+      !host.stderrIsTTY ||
       args.includes("--json") ||
       args.some((a) => SKIP_FLAGS.has(a)) ||
       SKIP_COMMANDS.has(command) ||
-      (deps.installMethod ?? defaultInstallMethod)() === "npx"
+      // `/_npx/` is matched before any package-manager spawn, so skipping `npm root -g` keeps this cheap.
+      detectInstall(host, () => null).method === "npx"
     ) {
       return noop;
     }
 
-    const now = deps.now ?? Date.now;
-    const current = deps.currentVersion ?? VERSION;
+    const current = VERSION;
     // Not configPaths(): config.ts would pull proper-lockfile into the entry chunk.
-    const file = path.join(deps.home ?? homedir(), ".tavily", "update-check.json");
+    const file = path.join(host.home, ".tavily", "update-check.json");
     const notify = (latest: string | null) => {
       try {
         if (latest === null || !isNewer(latest, current)) return;
@@ -101,7 +89,7 @@ export function startUpdateCheck(deps: UpdateNoticeDeps = {}): () => Promise<voi
     // The race is the only timeout: whatever is still in flight at finish is aborted, so a slow
     // registry never keeps the process alive after the command's output.
     const controller = new AbortController();
-    const pending = fetchLatestVersion(deps.fetchImpl, controller.signal).catch(() => null);
+    const pending = fetchLatestVersion(host.fetch, controller.signal).catch(() => null);
     return async () => {
       let timer: NodeJS.Timeout | undefined;
       const latest = await Promise.race([

@@ -10,8 +10,8 @@ import {
 } from "./commands/options.js";
 import type { PollOptions, RunOptions } from "./commands/research.js";
 import type { McpOptions } from "./commands/setup.js";
-import { type Context, defaultContext } from "./context.js";
 import { AGENT_NAMES } from "./core/agent-names.js";
+import { type Host, realHost } from "./host.js";
 import { out } from "./ui/theme.js";
 import { VERSION } from "./version.js";
 
@@ -39,7 +39,7 @@ function addExtractOptions(cmd: Command): Command {
     .addOption(new Option("--format <format>", "Output format.").choices(["markdown", "text"]));
 }
 
-export function buildProgram(ctx: Context = defaultContext): Command {
+export function buildProgram(host: Host = realHost()): Command {
   const program = new Command("tvly")
     .description("Tavily CLI — search, extract, crawl, map, and research from the command line.")
     .addHelpText("after", HELP_AFTER)
@@ -80,7 +80,7 @@ export function buildProgram(ctx: Context = defaultContext): Command {
     .option("--browser", "Open OAuth in a browser.")
     .option("--no-browser", "Print the OAuth URL and wait for its local callback.")
     .action(async (opts: InitOptions, cmd: Command) => {
-      await (await import("./commands/init.js")).run(opts, cmd, ctx);
+      await (await import("./commands/init.js")).run(opts, cmd, host);
     });
   const authModule = () => import("./commands/auth.js");
   program
@@ -89,19 +89,19 @@ export function buildProgram(ctx: Context = defaultContext): Command {
     .option("--api-key <key>", "Tavily API key (tvly-...). If omitted, opens browser for OAuth.")
     .option("--no-browser", "Print the login URL instead of opening a browser (SSH / headless).")
     .action(async (opts: { apiKey?: string; browser?: boolean }, cmd: Command) => {
-      await (await authModule()).runLogin(opts, cmd);
+      await (await authModule()).runLogin(opts, cmd, host);
     });
   program
     .command("logout")
     .description("Clear stored Tavily credentials.")
     .action(async (opts: Record<string, never>, cmd: Command) => {
-      await (await authModule()).runLogout(opts, cmd);
+      await (await authModule()).runLogout(opts, cmd, host);
     });
   program
     .command("auth")
     .description("Check authentication status.")
     .action(async (opts: Record<string, never>, cmd: Command) => {
-      await (await authModule()).runAuth(opts, cmd);
+      await (await authModule()).runAuth(opts, cmd, host);
     });
   const searchModule = () => import("./commands/search.js");
   const search = program
@@ -113,7 +113,7 @@ export function buildProgram(ctx: Context = defaultContext): Command {
     )
     .addHelpText("after", KEYLESS_HELP)
     .action(async (queries: string[], opts: Record<string, unknown>, cmd: Command) => {
-      await (await searchModule()).run(queries, opts, cmd, ctx);
+      await (await searchModule()).run(queries, opts, cmd, host);
     });
   // search's flags come from the SDK catalog; they are added only when search is dispatched.
   let searchConfigured = false;
@@ -135,7 +135,7 @@ export function buildProgram(ctx: Context = defaultContext): Command {
     .option("--timeout <seconds>", "Max wait time in seconds (1-60).", seconds)
     .addHelpText("after", KEYLESS_HELP)
     .action(async (urls: string[], opts: Record<string, unknown>, cmd: Command) => {
-      await (await import("./commands/extract.js")).run(urls, opts, cmd, ctx);
+      await (await import("./commands/extract.js")).run(urls, opts, cmd, host);
     });
   addCommonOptions(extract);
   const addSiteOptions = (cmd: Command, verb: string, limitHelp: string) => {
@@ -179,7 +179,7 @@ export function buildProgram(ctx: Context = defaultContext): Command {
     .option("--output-dir <dir>", "Save each page as a .md file in this directory.")
     .addHelpText("after", needsKey)
     .action(async (url: string, opts: Record<string, unknown>, cmd: Command) => {
-      await (await import("./commands/site.js")).runCrawl(url, opts, cmd, ctx);
+      await (await import("./commands/site.js")).runCrawl(url, opts, cmd, host);
     });
   addCommonOptions(crawl);
 
@@ -192,7 +192,7 @@ export function buildProgram(ctx: Context = defaultContext): Command {
   map
     .addHelpText("after", needsKey)
     .action(async (url: string, opts: Record<string, unknown>, cmd: Command) => {
-      await (await import("./commands/site.js")).runMap(url, opts, cmd, ctx);
+      await (await import("./commands/site.js")).runMap(url, opts, cmd, host);
     });
   addCommonOptions(map);
 
@@ -236,7 +236,7 @@ export function buildProgram(ctx: Context = defaultContext): Command {
   researchRun
     .addHelpText("after", `\nYou can also run directly: tvly research "your query"\n${needsKey}`)
     .action(async (query: string | undefined, opts: RunOptions, cmd: Command) => {
-      await (await research()).run(query, opts, cmd, ctx);
+      await (await research()).run(query, opts, cmd, host);
     });
 
   const researchStatus = group
@@ -244,7 +244,7 @@ export function buildProgram(ctx: Context = defaultContext): Command {
     .description("Check the status of a research task.")
     .argument("<request_id>", "The research request ID.")
     .action(async (requestId: string, opts: Record<string, unknown>, cmd: Command) => {
-      await (await research()).status(requestId, opts, cmd, ctx);
+      await (await research()).status(requestId, opts, cmd, host);
     });
   addClientNameOption(researchStatus);
 
@@ -253,7 +253,7 @@ export function buildProgram(ctx: Context = defaultContext): Command {
     .description("Poll a research task until completion and return results.")
     .argument("<request_id>", "The research request ID.")
     .action(async (requestId: string, opts: PollOptions, cmd: Command) => {
-      await (await research()).poll(requestId, opts, cmd, ctx);
+      await (await research()).poll(requestId, opts, cmd, host);
     });
   addWaitOptions(researchPoll);
   addCommonOptions(researchPoll);
@@ -263,7 +263,7 @@ export function buildProgram(ctx: Context = defaultContext): Command {
     .description("Check for or install the latest Tavily CLI release.")
     .option("--check", "Check for an update without installing it.")
     .action(async (opts: { check?: boolean }, cmd: Command) => {
-      await (await import("./commands/update.js")).run(opts, cmd);
+      await (await import("./commands/update.js")).run(opts, cmd, host);
     });
   const addDefaultOptions = (
     cmd: Command,
@@ -289,7 +289,7 @@ export function buildProgram(ctx: Context = defaultContext): Command {
     "Apply to",
   );
   setDefault.action(async (opts: DefaultsOptions, cmd: Command) => {
-    await (await defaults()).runSetDefault(opts, cmd);
+    await (await defaults()).runSetDefault(opts, cmd, host);
   });
   const unsetDefault = program
     .command("unset-default")
@@ -301,7 +301,7 @@ export function buildProgram(ctx: Context = defaultContext): Command {
     "Undo in",
   );
   unsetDefault.action(async (opts: DefaultsOptions, cmd: Command) => {
-    await (await defaults()).runUnsetDefault(opts, cmd);
+    await (await defaults()).runUnsetDefault(opts, cmd, host);
   });
 
   program
@@ -317,7 +317,7 @@ export function buildProgram(ctx: Context = defaultContext): Command {
     )
     .option("--keyless", "Sign in with OAuth even when TAVILY_API_KEY is set.")
     .action(async (opts: McpOptions, cmd: Command) => {
-      await (await import("./commands/setup.js")).runMcp(opts, cmd);
+      await (await import("./commands/setup.js")).runMcp(opts, cmd, host);
     });
 
   // Commander's built-in help command prints synchronously, before lazily added flags exist.
@@ -340,17 +340,17 @@ export function buildProgram(ctx: Context = defaultContext): Command {
       return;
     }
     if (opts.status) {
-      await (await import("./commands/status.js")).printStatus(json);
+      await (await import("./commands/status.js")).printStatus(json, host);
       return;
     }
     const { runRepl } = await import("./repl.js");
-    await runRepl();
+    await runRepl(host);
   });
 
   // `tvly research "<query>"` and `tvly research status` (no id) mean `research run ...`; the
   // tokens after `research` are rewritten before commander sees them.
   const parseAsync = program.parseAsync.bind(program);
-  program.parseAsync = async (argv = process.argv, parseOptions) => {
+  program.parseAsync = async (argv = host.argv, parseOptions) => {
     const args = [...argv];
     const start = parseOptions?.from === "user" ? 0 : 2;
     // Top-level options take no values, so the first non-option token is the command.

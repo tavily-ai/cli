@@ -14,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   type Config,
-  type ConfigOptions,
+  type ConfigHost,
   clearCredentials,
   configPaths,
   getApiBaseUrl,
@@ -29,6 +29,7 @@ import {
 } from "../src/core/config.js";
 import { expiresAtFromNow, type OAuthSession } from "../src/core/oauth.js";
 import { OAuthError } from "../src/errors.js";
+import { fakeHost } from "./helpers/host.js";
 
 const CONFIG_MODULE = pathToFileURL(
   fileURLToPath(new URL("../src/core/config.ts", import.meta.url)),
@@ -71,11 +72,11 @@ function jwt(payload: Record<string, unknown>): string {
 }
 
 let home: string;
-let opts: ConfigOptions;
+let opts: ConfigHost;
 
 beforeEach(() => {
   home = mkdtempSync(path.join(tmpdir(), "tvly-config-"));
-  opts = { home, env: {} };
+  opts = fakeHost({ home });
 });
 
 afterEach(async () => {
@@ -115,11 +116,11 @@ test("stored oauth without tokens is not revoked; incomplete client raises", asy
   expect(
     await revokeStoredOauth(
       { client_id: "cid", access_token: "", refresh_token: "" },
-      { fetchImpl: server.fetchImpl },
+      { ...opts, fetch: server.fetchImpl },
     ),
   ).toBe(false);
   await expect(
-    revokeStoredOauth({ access_token: "a" }, { fetchImpl: server.fetchImpl }),
+    revokeStoredOauth({ access_token: "a" }, { ...opts, fetch: server.fetchImpl }),
   ).rejects.toThrow(
     "Stored OAuth client metadata is incomplete; server revocation was not attempted.",
   );
@@ -148,7 +149,7 @@ test("clear credentials reports revocation failure but clears disk", async () =>
   writeFileSync(otherTokens, JSON.stringify({ access_token: jwt({ iss: "https://other/" }) }));
   const server = fakeServer({ revoke: () => new Response("", { status: 500 }) });
 
-  const result = await clearCredentials({ ...opts, fetchImpl: server.fetchImpl });
+  const result = await clearCredentials({ ...opts, fetch: server.fetchImpl });
 
   expect(result.serverRevoked).toBe(false);
   expect(result.revocationError).toBe(
@@ -161,11 +162,11 @@ test("clear credentials reports revocation failure but clears disk", async () =>
 test("clear credentials revokes, deletes an emptied config, and reports success", async () => {
   await writeConfig({ api_key: "tvly-x", oauth: previousOauth });
   const server = fakeServer({ revoke: ok });
-  const result = await clearCredentials({ ...opts, fetchImpl: server.fetchImpl });
+  const result = await clearCredentials({ ...opts, fetch: server.fetchImpl });
   expect(result).toEqual({ serverRevoked: true });
   expect(readdirSync(configPaths(home).dir)).not.toContain("config.json");
 
-  const again = await clearCredentials({ ...opts, fetchImpl: server.fetchImpl });
+  const again = await clearCredentials({ ...opts, fetch: server.fetchImpl });
   expect(again).toEqual({ serverRevoked: null });
 });
 
@@ -174,11 +175,11 @@ test("save api key works offline and with an oauth block lacking client_id", asy
     throw new TypeError("fetch failed");
   }) as typeof fetch;
   await writeConfig({ oauth: previousOauth });
-  await saveApiKey("tvly-offline", { ...opts, fetchImpl: offline });
+  await saveApiKey("tvly-offline", { ...opts, fetch: offline });
   expect(readConfig(opts)).toEqual({ api_key: "tvly-offline" });
 
   await writeConfig({ oauth: { access_token: "a" } });
-  await saveApiKey("tvly-no-client", { ...opts, fetchImpl: offline });
+  await saveApiKey("tvly-no-client", { ...opts, fetch: offline });
   expect(readConfig(opts)).toEqual({ api_key: "tvly-no-client" });
 });
 
@@ -191,7 +192,7 @@ test("save oauth session revokes previous before overwrite", async () => {
     },
   });
 
-  await saveOauthSession(replacementSession, { ...opts, fetchImpl: server.fetchImpl });
+  await saveOauthSession(replacementSession, { ...opts, fetch: server.fetchImpl });
 
   const stored = readConfig(opts).oauth as Record<string, unknown>;
   expect(server.revoked()).toEqual([
@@ -213,7 +214,7 @@ test("save oauth session keeps previous and cleans replacement on failure", asyn
 
   const err = await saveOauthSession(replacementSession, {
     ...opts,
-    fetchImpl: server.fetchImpl,
+    fetch: server.fetchImpl,
   }).catch((e: unknown) => e);
 
   expect(err).toBeInstanceOf(OAuthError);
@@ -235,7 +236,7 @@ test("save oauth session reports when the replacement cleanup also fails", async
 
   const err = await saveOauthSession(replacementSession, {
     ...opts,
-    fetchImpl: server.fetchImpl,
+    fetch: server.fetchImpl,
   }).catch((e: unknown) => e);
 
   expect(err).toBeInstanceOf(OAuthError);
@@ -267,7 +268,7 @@ test("malformed expiry refreshes without revoking active session", async () => {
     },
   });
 
-  const accessToken = await getApiKey({ ...opts, fetchImpl: server.fetchImpl });
+  const accessToken = await getApiKey({ ...opts, fetch: server.fetchImpl });
 
   expect(accessToken).toBe("new-access");
   const stored = readConfig(opts).oauth as Record<string, unknown>;
@@ -283,7 +284,7 @@ test("malformed expiry refreshes without revoking active session", async () => {
 test("malformed expiry without refresh is invalid", async () => {
   await writeConfig({ oauth: { access_token: "old-access", expires_at: "bad" } });
   const server = fakeServer();
-  expect(await getApiKey({ ...opts, fetchImpl: server.fetchImpl })).toBeNull();
+  expect(await getApiKey({ ...opts, fetch: server.fetchImpl })).toBeNull();
   expect(server.calls).toEqual([]);
 });
 
@@ -325,7 +326,7 @@ test("parallel expired session refreshes once", async () => {
       return json({ access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 });
     },
   });
-  const o = { ...opts, fetchImpl: server.fetchImpl };
+  const o = { ...opts, fetch: server.fetchImpl };
 
   const first = getApiKey(o);
   await started;
@@ -390,7 +391,7 @@ test("refresh failure is reported and preserves session", async () => {
     throw new TypeError("network down");
   }) as typeof fetch;
 
-  const err = await getApiKey({ ...opts, fetchImpl }).catch((e: unknown) => e);
+  const err = await getApiKey({ ...opts, fetch: fetchImpl }).catch((e: unknown) => e);
 
   expect(err).toBeInstanceOf(OAuthError);
   expect((err as Error).message).toMatch(/^Could not refresh.*network down/);
@@ -426,7 +427,7 @@ test("api key and oauth replace each other", async () => {
   expect(stored).not.toHaveProperty("api_key");
 
   const server = fakeServer({ revoke: ok });
-  await saveApiKey("tvly-other", { ...opts, fetchImpl: server.fetchImpl });
+  await saveApiKey("tvly-other", { ...opts, fetch: server.fetchImpl });
   expect(await getApiKey(opts)).toBe("tvly-other");
   expect(hasStoredOauth(opts)).toBe(false);
   expect(server.revoked()).toEqual([
@@ -444,14 +445,14 @@ test("getApiKey with an unwritable HOME and no env key resolves keyless instead 
   // A regular file as HOME: ~/.tavily can be neither read nor created.
   const fileHome = path.join(home, "not-a-dir");
   writeFileSync(fileHome, "");
-  expect(await getApiKey({ home: fileHome, env: {} })).toBeNull();
+  expect(await getApiKey(fakeHost({ home: fileHome }))).toBeNull();
 });
 
 test("reading a Python-written config returns its unexpired access token", async () => {
   mkdirSync(configPaths(home).dir, { recursive: true });
   copyFileSync(FIXTURE, configPaths(home).file);
   const server = fakeServer();
-  expect(await getApiKey({ ...opts, fetchImpl: server.fetchImpl })).toBe("python-access-token");
+  expect(await getApiKey({ ...opts, fetch: server.fetchImpl })).toBe("python-access-token");
   expect(getHumanId(opts)).toBe("human-1");
   expect(server.calls).toEqual([]);
 });
@@ -547,5 +548,5 @@ test("human id and api base url resolve env over config", async () => {
   const env = { TAVILY_HUMAN_ID: "env-human", TAVILY_API_BASE_URL: "https://env.example/" };
   expect(getHumanId({ ...opts, env })).toBe("env-human");
   expect(getApiBaseUrl({ ...opts, env })).toBe("https://env.example");
-  expect(getApiBaseUrl({ home: path.join(home, "empty"), env: {} })).toBeNull();
+  expect(getApiBaseUrl(fakeHost({ home: path.join(home, "empty") }))).toBeNull();
 });

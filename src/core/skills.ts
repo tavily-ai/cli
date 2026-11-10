@@ -5,10 +5,10 @@
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { type Exec, type ExecResult, exec } from "../util/exec.js";
+import type { Host } from "../host.js";
+import type { Exec, ExecResult } from "../util/exec.js";
 import type { AGENT_NAMES } from "./agent-names.js";
 
 export const SKILLS_REPO = "tavily-ai/skills";
@@ -24,19 +24,8 @@ export interface SkillsInstallResult {
   restartRequired: boolean;
 }
 
-interface SkillsOptions {
-  home?: string;
-  env?: NodeJS.ProcessEnv;
-}
-
-export interface SkillsDeps extends SkillsOptions {
-  exec?: Exec;
-}
-
 /** Each supported agent's configuration directory under the current user's home. */
-function agentRoots(opts: SkillsOptions = {}): Record<AgentName, string> {
-  const root = opts.home ?? homedir();
-  const env = opts.env ?? process.env;
+function agentRoots({ home: root, env }: Pick<Host, "home" | "env">): Record<AgentName, string> {
   return {
     "claude-code": env.CLAUDE_CONFIG_DIR || path.join(root, ".claude"),
     codex: env.CODEX_HOME || path.join(root, ".codex"),
@@ -53,30 +42,29 @@ function isDir(p: string): boolean {
 }
 
 /** Detect supported agents from their existing configuration directories. */
-export function detectAgents(opts: SkillsOptions = {}): AgentName[] {
-  return (Object.entries(agentRoots(opts)) as [AgentName, string][])
+export function detectAgents(host: Pick<Host, "home" | "env">): AgentName[] {
+  return (Object.entries(agentRoots(host)) as [AgentName, string][])
     .filter(([, dir]) => isDir(dir))
     .map(([name]) => name);
 }
 
 /** Run npx with `args` (5-minute timeout). Null when npx is not on PATH. */
-export function runNpx(args: string[], deps: SkillsDeps): ExecResult | null {
-  const x = deps.exec ?? exec;
-  const npx = x.which("npx");
-  return npx ? x.run(npx, args, { timeoutMs: 300_000 }) : null;
+export function runNpx(args: string[], exec: Exec): ExecResult | null {
+  const npx = exec.which("npx");
+  return npx ? exec.run(npx, args, { timeoutMs: 300_000 }) : null;
 }
 
 /** Install every skill in a skills repo (Tavily skills or workflows) for the selected agents. */
 export async function installAgentSkills(
   repo: string,
   agents: string[],
-  deps: SkillsDeps = {},
+  host: Pick<Host, "home" | "env" | "exec">,
 ): Promise<SkillsInstallResult> {
   // npx writes to the shared directory, or straight into an agent's own
   // directory when that agent is the only target.
-  const roots = agentRoots(deps) as Record<string, string>;
+  const roots = agentRoots(host) as Record<string, string>;
   const skillDirs = [
-    path.join(deps.home ?? homedir(), ".agents", "skills"),
+    path.join(host.home, ".agents", "skills"),
     ...agents.flatMap((name) => (roots[name] ? [path.join(roots[name], "skills")] : [])),
   ];
   const before = snapshotSkills(skillDirs);
@@ -95,7 +83,7 @@ export async function installAgentSkills(
     ...agents,
     "--yes",
   ];
-  const completed = runNpx(args, deps);
+  const completed = runNpx(args, host.exec);
   if (!completed) {
     throw new Error(
       "Installing Tavily skills requires Node.js (npx). Install Node.js, or rerun with --skip-skills.",

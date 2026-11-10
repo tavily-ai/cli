@@ -1,9 +1,9 @@
 /** Disable agents' built-in web search so Tavily becomes the default web tool. */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { InvalidArgumentError } from "commander";
 import { isObject } from "../errors.js";
+import type { Host } from "../host.js";
 
 const CLAUDE_DENIED_TOOLS = ["WebSearch", "WebFetch"];
 const CODEX_WEB_SEARCH_LINE = 'web_search = "disabled"';
@@ -12,32 +12,26 @@ const TOML_TABLE_HEADER = /^\s*\[/;
 const TOML_WEB_SEARCH = /^\s*web_search\s*=/;
 const TOML_WEB_SEARCH_DISABLED = /^\s*web_search\s*=\s*["']disabled["']\s*(#.*)?$/;
 
-export interface PathContext {
-  project?: boolean;
-  env?: NodeJS.ProcessEnv;
-  cwd?: string;
-  home?: string;
-}
+export type PathContext = Pick<Host, "home" | "env" | "cwd"> & { project: boolean };
 
 /** `~` and `~/...` expand to the home directory, like Python's `expanduser`. */
 function expandUser(p: string, home: string): string {
   return p === "~" || p.startsWith("~/") ? join(home, p.slice(1)) : p;
 }
 
-function configRoot(envVar: string, dirName: string, ctx: PathContext): string {
-  const home = ctx.home ?? homedir();
-  const raw = (ctx.env ?? process.env)[envVar];
+function configRoot(envVar: string, dirName: string, { home, env }: PathContext): string {
+  const raw = env[envVar];
   return raw ? resolve(expandUser(raw, home)) : join(home, dirName);
 }
 
-export function claudeSettingsPath(ctx: PathContext = {}): string {
+export function claudeSettingsPath(ctx: PathContext): string {
   // Personal project settings; Claude Code gitignores this file automatically.
-  if (ctx.project) return join(ctx.cwd ?? process.cwd(), ".claude", "settings.local.json");
+  if (ctx.project) return join(ctx.cwd, ".claude", "settings.local.json");
   return join(configRoot("CLAUDE_CONFIG_DIR", ".claude", ctx), "settings.json");
 }
 
-export function codexConfigPath(ctx: PathContext = {}): string {
-  if (ctx.project) return join(ctx.cwd ?? process.cwd(), ".codex", "config.toml");
+export function codexConfigPath(ctx: PathContext): string {
+  if (ctx.project) return join(ctx.cwd, ".codex", "config.toml");
   return join(configRoot("CODEX_HOME", ".codex", ctx), "config.toml");
 }
 

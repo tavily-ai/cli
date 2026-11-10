@@ -1,5 +1,5 @@
 /** Credential helpers for commands that never call the API, so they stay free of the SDK. */
-import { type ConfigOptions, getApiKey } from "../core/config.js";
+import { type ConfigHost, getApiKey } from "../core/config.js";
 import { ExitError, messageOf, OAuthError } from "../errors.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
@@ -16,12 +16,9 @@ export function handleOauthRefreshError(e: unknown, json: boolean): never {
 }
 
 /** The stored/env credential, or null; a failed OAuth refresh exits 3. */
-export async function getApiKeyOrExit(
-  json: boolean,
-  opts: ConfigOptions = {},
-): Promise<string | null> {
+export async function getApiKeyOrExit(json: boolean, host: ConfigHost): Promise<string | null> {
   try {
-    return await getApiKey(opts);
+    return await getApiKey(host);
   } catch (e) {
     if (e instanceof OAuthError) handleOauthRefreshError(e, json);
     throw e;

@@ -1,13 +1,15 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Command } from "commander";
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { type AuthDeps, runAuth, runLogin, runLogout } from "../src/commands/auth.js";
+import { type LoginHooks, runLogin } from "../src/commands/auth.js";
 import { configPaths, readConfig } from "../src/core/config.js";
 import type { OAuthSession } from "../src/core/oauth.js";
-import { OAuthError } from "../src/errors.js";
+import { ExitError, OAuthError } from "../src/errors.js";
+import type { Host } from "../src/host.js";
 import { captureOutput, visible } from "./helpers/capture.js";
-import { runProgram } from "./helpers/program.js";
+import { fakeHost, runProgram } from "./helpers/program.js";
 
 const io = captureOutput();
 
@@ -53,26 +55,32 @@ const fetchWith = (revokeStatus: number): typeof fetch =>
     throw new Error(`unexpected request to ${url}`);
   }) as typeof fetch;
 
-/** Run the real program in-process with the auth commands bound to `deps`. */
-const runAuthProgram = (argv: string[], deps: AuthDeps) =>
-  runProgram(argv, undefined, {
-    actions: {
-      login: (o, c) => runLogin(o, c, deps),
-      logout: (o, c) => runLogout(o, c, deps),
-      auth: (o, c) => runAuth(o, c, deps),
-    },
-  });
+const host = (over: Partial<Host> = {}) => fakeHost({ home, ...over });
+
+/** `tvly login` with the browser login stubbed; the exit code `cli.ts` would set. */
+async function login(
+  opts: { apiKey?: string; browser?: boolean },
+  json: boolean,
+  h: Host,
+  hook: NonNullable<LoginHooks["login"]>,
+): Promise<number> {
+  const cmd = new Command().option("--json");
+  cmd.setOptionValue("json", json);
+  try {
+    await runLogin(opts, cmd, h, { login: hook });
+    return 0;
+  } catch (e) {
+    if (e instanceof ExitError) return e.code;
+    throw e;
+  }
+}
 
 const stdoutJson = () => JSON.parse(io.stdout());
 
 describe("logout", () => {
   test("--json reports partial revocation failure and exits 3", async () => {
     writeConfig({ oauth: storedOauth });
-    const code = await runAuthProgram(["logout", "--json"], {
-      home,
-      env: {},
-      fetchImpl: fetchWith(500),
-    });
+    const code = await runProgram(["logout", "--json"], host({ fetch: fetchWith(500) }));
     expect(code).toBe(3);
     expect(stdoutJson()).toEqual({
       authenticated: false,
@@ -87,9 +95,8 @@ describe("logout", () => {
   });
 
   test("--json reports a remaining environment credential", async () => {
-    const env = { TAVILY_API_KEY: "tvly-environment-secret" };
-    const deps = { home, env, fetchImpl: fetchWith(200) };
-    expect(await runAuthProgram(["logout", "--json"], deps)).toBe(0);
+    const h = host({ env: { TAVILY_API_KEY: "tvly-environment-secret" }, fetch: fetchWith(200) });
+    expect(await runProgram(["logout", "--json"], h)).toBe(0);
     expect(JSON.parse(io.stdout().trim().split("\n")[0] ?? "")).toEqual({
       authenticated: true,
       method: "env",
@@ -101,7 +108,7 @@ describe("logout", () => {
     });
     expect(io.stdout()).not.toContain("tvly-environment-secret");
 
-    expect(await runAuthProgram(["auth", "--json"], deps)).toBe(0);
+    expect(await runProgram(["auth", "--json"], h)).toBe(0);
     expect(JSON.parse(io.stdout().trim().split("\n").at(-1) ?? "")).toEqual({
       authenticated: true,
       method: "env",
@@ -111,11 +118,7 @@ describe("logout", () => {
 
   test("--json reports unauthenticated after cleanup", async () => {
     writeConfig({ api_key: "tvly-stored" });
-    const code = await runAuthProgram(["logout", "--json"], {
-      home,
-      env: {},
-      fetchImpl: fetchWith(200),
-    });
+    const code = await runProgram(["logout", "--json"], host({ fetch: fetchWith(200) }));
     expect(code).toBe(0);
     expect(stdoutJson()).toEqual({
       authenticated: false,
@@ -129,17 +132,17 @@ describe("logout", () => {
 
 describe("login", () => {
   test.each([
-    { name: "--no-browser", argv: ["--json", "login", "--no-browser"], env: { DISPLAY: ":0" } },
-    { name: "a headless environment", argv: ["--json", "login"], env: { SSH_CONNECTION: "x" } },
-  ])("--json with $name emits the authorization URL on stderr", async ({ argv, env }) => {
-    const login = vi.fn<NonNullable<AuthDeps["login"]>>(async (opts) => {
-      expect(opts.openBrowser).toBe(false);
-      expect(opts.onStatus).toBeTypeOf("function");
-      opts.onStatus?.("https://mcp.tavily.com/authorize?client_id=cid");
+    { name: "--no-browser", opts: { browser: false }, env: { DISPLAY: ":0" } },
+    { name: "a headless environment", opts: {}, env: { SSH_CONNECTION: "x" } },
+  ])("--json with $name emits the authorization URL on stderr", async ({ opts, env }) => {
+    const hook = vi.fn<NonNullable<LoginHooks["login"]>>(async (o) => {
+      expect(o.openBrowser).toBe(false);
+      expect(o.onStatus).toBeTypeOf("function");
+      o.onStatus?.("https://mcp.tavily.com/authorize?client_id=cid");
       return session;
     });
-    const code = await runAuthProgram(argv, { home, env, login, fetchImpl: fetchWith(200) });
-    expect(code).toBe(0);
+    const h = host({ env, fetch: fetchWith(200) });
+    expect(await login(opts, true, h, hook)).toBe(0);
     expect(stdoutJson()).toEqual({
       authenticated: true,
       method: "oauth",
@@ -149,20 +152,20 @@ describe("login", () => {
       event: "authorization_required",
       authorization_url: "https://mcp.tavily.com/authorize?client_id=cid",
     });
-    expect(readConfig({ home, env })).toHaveProperty("oauth.access_token", "access-1");
+    expect(readConfig(h)).toHaveProperty("oauth.access_token", "access-1");
   });
 
   test("the printed authorization URL has control bytes stripped", async () => {
-    const login = vi.fn<NonNullable<AuthDeps["login"]>>(async (opts) => {
-      opts.onStatus?.("https://mcp.tavily.com/authorize?x=\x1b]8;;evil\x07y");
+    const hook = vi.fn<NonNullable<LoginHooks["login"]>>(async (o) => {
+      o.onStatus?.("https://mcp.tavily.com/authorize?x=\x1b]8;;evil\x07y");
       return session;
     });
-    await runAuthProgram(["login", "--no-browser"], {
-      home,
-      env: { DISPLAY: ":0" },
-      login,
-      fetchImpl: fetchWith(200),
-    });
+    await login(
+      { browser: false },
+      false,
+      host({ env: { DISPLAY: ":0" }, fetch: fetchWith(200) }),
+      hook,
+    );
     expect(io.stderr()).toContain("https://mcp.tavily.com/authorize?x=]8;;evily");
     expect(io.stderr()).not.toContain("\x1b");
     expect(io.stderr()).not.toContain("\x07");
@@ -170,51 +173,37 @@ describe("login", () => {
 
   test("--api-key --json saves the key, even when revoking the old oauth fails", async () => {
     writeConfig({ oauth: storedOauth });
-    const code = await runAuthProgram(["--json", "login", "--api-key", "tvly-new"], {
-      home,
-      env: {},
-      fetchImpl: fetchWith(500),
-    });
+    const h = host({ fetch: fetchWith(500) });
+    const code = await runProgram(["--json", "login", "--api-key", "tvly-new"], h);
     expect(code).toBe(0);
     expect(stdoutJson()).toEqual({
       authenticated: true,
       method: "api_key",
       detail: `Saved to ${configPaths(home).file}`,
     });
-    expect(readConfig({ home, env: {} })).toEqual({ api_key: "tvly-new" });
+    expect(readConfig(h)).toEqual({ api_key: "tvly-new" });
   });
 
   test("oauth --json reports replacement revocation failure", async () => {
     writeConfig({ oauth: storedOauth });
-    const login = vi.fn<NonNullable<AuthDeps["login"]>>(async () => session);
-    const code = await runAuthProgram(["--json", "login"], {
-      home,
-      env: { DISPLAY: ":0" },
-      login,
-      fetchImpl: fetchWith(500),
-    });
-    expect(code).toBe(3);
+    const h = host({ env: { DISPLAY: ":0" }, fetch: fetchWith(500) });
+    expect(await login({}, true, h, async () => session)).toBe(3);
     const body = stdoutJson();
     expect(body.authenticated).toBe(false);
     expect(body.error).toContain("Could not replace the previous OAuth session");
   });
 
   test("a failed oauth login prints the failure block and exits 3", async () => {
-    const login = async () => {
+    const hook = async () => {
       throw new OAuthError("denied");
     };
-    const code = await runAuthProgram(["login"], {
-      home,
-      env: { DISPLAY: ":0" },
-      login,
-    });
-    expect(code).toBe(3);
+    expect(await login({}, false, host({ env: { DISPLAY: ":0" } }), hook)).toBe(3);
     expect(visible(io.stderr())).toContain("> denied");
     expect(visible(io.stderr())).toContain("tvly login --api-key tvly-YOUR_KEY");
   });
 
   test("human success prints the logo and the five get-started lines", async () => {
-    const code = await runAuthProgram(["login", "--api-key", "tvly-new"], { home, env: {} });
+    const code = await runProgram(["login", "--api-key", "tvly-new"], host());
     expect(code).toBe(0);
     const text = visible(io.stdout());
     expect(text).toContain("> Authenticated via API key");
@@ -234,12 +223,12 @@ describe("login", () => {
 
 describe("auth", () => {
   test("short keys are fully masked", async () => {
-    await runAuthProgram(["auth"], { home, env: { TAVILY_API_KEY: "tvly-short" } });
+    await runProgram(["auth"], host({ env: { TAVILY_API_KEY: "tvly-short" } }));
     expect(visible(io.stdout())).toContain("Key: ***");
   });
 
   test("reports not authenticated", async () => {
-    await runAuthProgram(["auth"], { home, env: {} });
+    await runProgram(["auth"], host());
     expect(visible(io.stdout())).toContain("> Not authenticated");
     expect(visible(io.stdout())).toContain("Run tvly login to authenticate.");
   });

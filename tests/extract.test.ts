@@ -5,7 +5,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { Json } from "../src/core/tavily-client.js";
 import { setTerminalOverride } from "../src/ui/text.js";
 import { captureOutput } from "./helpers/capture.js";
-import { runProgram, stubClient } from "./helpers/program.js";
+import { clientHost, runProgram } from "./helpers/program.js";
 
 const io = captureOutput();
 const fixture = JSON.parse(
@@ -20,7 +20,7 @@ test("extract --json posts the URLs and prints the response pretty-printed", asy
   expect(
     await runProgram(
       ["extract", "https://a.example", "https://b.example", "--json"],
-      stubClient({ extract }),
+      clientHost({ extract }),
     ),
   ).toBe(0);
   expect(extract).toHaveBeenCalledWith({ urls: ["https://a.example", "https://b.example"] });
@@ -46,7 +46,7 @@ test("every extract option reaches the request body", async () => {
       "--timeout",
       "12.5",
     ],
-    stubClient({ extract }),
+    clientHost({ extract }),
   );
   expect(extract).toHaveBeenCalledWith({
     urls: ["https://a.example"],
@@ -62,13 +62,13 @@ test("every extract option reaches the request body", async () => {
 test("more than 20 URLs exits 2", async () => {
   const extract = vi.fn(async () => fixture);
   const urls = Array.from({ length: 21 }, (_, i) => `https://u${i}.example`);
-  expect(await runProgram(["extract", ...urls], stubClient({ extract }))).toBe(2);
+  expect(await runProgram(["extract", ...urls], clientHost({ extract }))).toBe(2);
   expect(io.stderr()).toContain("Maximum 20 URLs per request.");
   expect(extract).not.toHaveBeenCalled();
 });
 
 test("usage errors exit 2", async () => {
-  const client = stubClient({ extract: async () => fixture });
+  const client = clientHost({ extract: async () => fixture });
   expect(await runProgram(["extract"], client)).toBe(2);
   expect(await runProgram(["extract", "https://a.example", "--format", "pdf"], client)).toBe(2);
   expect(await runProgram(["extract", "https://a.example", "--timeout", "soon"], client)).toBe(2);
@@ -81,7 +81,7 @@ test("bare -o names the file after the first URL's host", async () => {
   process.chdir(dir);
   await runProgram(
     ["extract", "https://docs.example.com/x", "-o"],
-    stubClient({ extract: async () => fixture }),
+    clientHost({ extract: async () => fixture }),
   );
   const saved = readdirSync(join(dir, ".tavily")).filter((f) => f.endsWith(".json"));
   expect(saved).toHaveLength(1);

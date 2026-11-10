@@ -10,6 +10,9 @@ export interface FakeExec extends Exec {
   calls: ExecCall[];
 }
 
+/** Scripts a fake run's result from its bin and args; undefined is ok with empty output. */
+export type ExecScript = (bin: string, args: string[]) => Partial<ExecResult> | undefined;
+
 /** A complete `ExecResult`: ok with empty output unless overridden. */
 export function execResult(over: Partial<ExecResult> = {}): ExecResult {
   return { ok: true, stdout: "", stderr: "", failure: null, ...over };
@@ -20,10 +23,7 @@ export function execResult(over: Partial<ExecResult> = {}): ExecResult {
  * given; `run` scripts each result from the bin and args (default: ok with empty output).
  */
 export function fakeExec(
-  opts: {
-    which?: (name: string) => string | null;
-    run?: (bin: string, args: string[]) => Partial<ExecResult> | undefined;
-  } = {},
+  opts: { which?: (name: string) => string | null; run?: ExecScript } = {},
 ): FakeExec {
   const calls: ExecCall[] = [];
   return {

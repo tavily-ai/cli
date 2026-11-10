@@ -57,13 +57,13 @@ test("stores only ppid when gppid is null and treats a corrupt file as empty", (
 
 test("grandparentPid parses /proc stat on linux", () => {
   const readFile = vi.fn(() => "1234 (node) S 42 1234 1234 0 -1");
-  expect(grandparentPid(1234, { platform: "linux", readFile })).toBe(42);
+  expect(grandparentPid(1234, { platform: "linux", exec: fakeExec() }, readFile)).toBe(42);
   expect(readFile).toHaveBeenCalledWith("/proc/1234/stat");
 });
 
 test("grandparentPid handles parentheses in the linux command name", () => {
   const readFile = () => "1234 (a) b) S 42 1 1";
-  expect(grandparentPid(1234, { platform: "linux", readFile })).toBe(42);
+  expect(grandparentPid(1234, { platform: "linux", exec: fakeExec() }, readFile)).toBe(42);
 });
 
 test("grandparentPid parses ps output on darwin", () => {
@@ -96,7 +96,7 @@ test("grandparentPid returns null on a failed run or non-integer output", () => 
   const throws = () => {
     throw new Error("nope");
   };
-  expect(grandparentPid(9, { platform: "linux", readFile: throws })).toBeNull();
+  expect(grandparentPid(9, { platform: "linux", exec: fakeExec() }, throws)).toBeNull();
 });
 
 test("pidAlive is true for this process and false for an impossible pid", () => {

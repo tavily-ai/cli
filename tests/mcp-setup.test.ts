@@ -31,11 +31,7 @@ const which = (name: string) => (name === "npx" ? NPX : name === "codex" ? CODEX
 describe("installMcp", () => {
   it("with TAVILY_API_KEY exported writes an environment reference, never the key", async () => {
     const exec = fakeExec({ which });
-    const out = await installMcp(ALL, {
-      keyless: false,
-      env: { TAVILY_API_KEY: "tvly-secret" },
-      exec,
-    });
+    const out = await installMcp(ALL, false, { env: { TAVILY_API_KEY: "tvly-secret" }, exec });
     expect(out).toEqual({ configured: ALL, skipped: [], auth: "env" });
     expect(exec.calls.map((c) => [c.bin, ...c.args])).toEqual([
       [NPX, ...addMcpArgs("claude-code", CLAUDE_HEADER)],
@@ -58,7 +54,7 @@ describe("installMcp", () => {
   it("without a key, or with --keyless, passes the URL alone for OAuth", async () => {
     for (const env of [{}, { TAVILY_API_KEY: "tvly-secret" }]) {
       const exec = fakeExec({ which });
-      const out = await installMcp(ALL, { keyless: env.TAVILY_API_KEY !== undefined, env, exec });
+      const out = await installMcp(ALL, env.TAVILY_API_KEY !== undefined, { env, exec });
       expect(out).toEqual({ configured: ALL, skipped: [], auth: "oauth" });
       expect(exec.calls.map((c) => c.args)).toEqual(ALL.map((agent) => addMcpArgs(agent)));
     }
@@ -66,11 +62,7 @@ describe("installMcp", () => {
 
   it("skips codex when its binary is missing and still configures the others", async () => {
     const exec = fakeExec({ which: (name) => (name === "npx" ? NPX : null) });
-    const out = await installMcp(ALL, {
-      keyless: false,
-      env: { TAVILY_API_KEY: "tvly-secret" },
-      exec,
-    });
+    const out = await installMcp(ALL, false, { env: { TAVILY_API_KEY: "tvly-secret" }, exec });
     expect(out.configured).toEqual(["claude-code", "cursor"]);
     expect(out.skipped).toEqual([{ agent: "codex", reason: "codex is not on PATH" }]);
     expect(exec.calls).toHaveLength(2);
@@ -78,13 +70,13 @@ describe("installMcp", () => {
 
   it("reports an add-mcp failure as a skip with its failure summary", async () => {
     const exec = fakeExec({ which, run: () => ({ ok: false, failure: "Error: write failed" }) });
-    const out = await installMcp(["cursor"], { keyless: true, env: {}, exec });
+    const out = await installMcp(["cursor"], true, { env: {}, exec });
     expect(out.skipped).toEqual([{ agent: "cursor", reason: "Error: write failed" }]);
   });
 
   it("requires npx", async () => {
     await expect(
-      installMcp(["cursor"], { keyless: true, env: {}, exec: fakeExec({ which: () => null }) }),
+      installMcp(["cursor"], true, { env: {}, exec: fakeExec({ which: () => null }) }),
     ).rejects.toThrow(/requires Node\.js/);
   });
 });

@@ -1,36 +1,33 @@
 /** tvly update — check for or install the latest Tavily CLI release. */
-import { realpathSync } from "node:fs";
 import type { Command } from "commander";
-import { detectInstall, fetchLatestVersion, type InstallInfo } from "../core/install-detect.js";
+import {
+  detectInstall,
+  fetchLatestVersion,
+  type InstallInfo,
+  safeRealpath,
+} from "../core/install-detect.js";
 import { ExitError, messageOf } from "../errors.js";
+import type { Host } from "../host.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
-import { type Exec, exec } from "../util/exec.js";
 import { compareVersions, isNewer } from "../util/semver.js";
 import { VERSION } from "../version.js";
 import { resolveJson } from "./options.js";
 
-export interface UpdateDeps {
-  currentVersion?: string;
-  fetchImpl?: typeof fetch;
-  detectInstall?: () => InstallInfo;
-  exec?: Exec;
-  argv1?: string;
-  realpath?: (p: string) => string;
-}
+type UpdateHost = Pick<Host, "argv" | "env" | "exec" | "fetch">;
 
 interface UpdateOptions {
   check?: boolean;
 }
 
-export async function run(opts: UpdateOptions, cmd: Command, deps: UpdateDeps = {}): Promise<void> {
+export async function run(opts: UpdateOptions, cmd: Command, host: UpdateHost): Promise<void> {
   const json = resolveJson(cmd);
-  const current = deps.currentVersion ?? VERSION;
+  const current = VERSION;
 
   let latest: string;
   let updateAvailable: boolean;
   try {
-    latest = await fetchLatestVersion(deps.fetchImpl);
+    latest = await fetchLatestVersion(host.fetch);
     updateAvailable = isNewer(latest, current);
   } catch (e) {
     return fail("check", messageOf(e), 4, json);
@@ -38,7 +35,7 @@ export async function run(opts: UpdateOptions, cmd: Command, deps: UpdateDeps = 
 
   let install: InstallInfo;
   try {
-    install = (deps.detectInstall ?? detectInstall)();
+    install = detectInstall(host);
   } catch (e) {
     return fail("install_method", messageOf(e), 1, json);
   }
@@ -54,14 +51,13 @@ export async function run(opts: UpdateOptions, cmd: Command, deps: UpdateDeps = 
 
   if (!json) out(`Updating Tavily CLI via ${install.method}...`);
 
-  const x = deps.exec ?? exec;
   const [file = "", ...args] = install.command;
-  const completed = x.run(file, args, { timeoutMs: 300_000 });
+  const completed = host.exec.run(file, args, { timeoutMs: 300_000 });
   if (completed.failure) return fail("update", completed.failure, 1, json);
 
   let installed: string;
   try {
-    installed = installedVersion(deps, x);
+    installed = installedVersion(host);
     if (isNewer(latest, installed)) {
       let message =
         `The package manager completed, but Tavily CLI is still ${installed}; latest is ${latest}. ` +
@@ -83,10 +79,9 @@ export async function run(opts: UpdateOptions, cmd: Command, deps: UpdateDeps = 
 }
 
 /** Ask the (possibly upgraded) installed binary for its version: `node <entry> --version`. */
-function installedVersion(deps: UpdateDeps, x: Exec): string {
-  const realpath = deps.realpath ?? realpathSync;
-  const entry = realpath(deps.argv1 ?? process.argv[1] ?? "");
-  const r = x.run(process.execPath, [entry, "--version"], { timeoutMs: 30_000 });
+function installedVersion(host: UpdateHost): string {
+  const entry = safeRealpath(host.argv[1] ?? "");
+  const r = host.exec.run(process.execPath, [entry, "--version"], { timeoutMs: 30_000 });
   if (!r.ok) throw new Error(`Could not read the installed Tavily CLI version: ${r.failure}`);
   const token = sanitizeControl(r.stdout).trim().split(/\s+/).pop();
   if (!token) throw new Error("Could not read the installed Tavily CLI version.");

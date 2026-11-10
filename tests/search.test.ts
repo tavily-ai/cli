@@ -13,7 +13,7 @@ import {
 import type { Json } from "../src/core/tavily-client.js";
 import { setTerminalOverride } from "../src/ui/text.js";
 import { captureOutput, visible } from "./helpers/capture.js";
-import { runProgram, stubClient } from "./helpers/program.js";
+import { clientHost, runProgram } from "./helpers/program.js";
 
 const io = captureOutput();
 const fixture = JSON.parse(
@@ -35,7 +35,7 @@ function fakeClient() {
     query: body.query,
     results: [{ title: `T ${body.query}`, url: `https://a.example/${body.query}`, content: "c" }],
   }));
-  return { search, client: stubClient({ search }) };
+  return { search, client: clientHost({ search }) };
 }
 
 const cwd = process.cwd();
@@ -43,7 +43,7 @@ afterEach(() => process.chdir(cwd));
 
 test("search --json posts only the query and prints the response pretty-printed", async () => {
   const search = vi.fn(async () => fixture);
-  expect(await runProgram(["search", "q", "--json"], stubClient({ search }))).toBe(0);
+  expect(await runProgram(["search", "q", "--json"], clientHost({ search }))).toBe(0);
   expect(search).toHaveBeenCalledWith({ query: "q" });
   expect(io.stdout()).toBe(`${JSON.stringify(fixture, null, 2)}\n`);
 });
@@ -66,7 +66,7 @@ test("generated flags reach the request body in snake_case", async () => {
       "--chunks-per-source",
       "2",
     ],
-    stubClient({ search }),
+    clientHost({ search }),
   );
   expect(search).toHaveBeenCalledWith({
     query: "q",
@@ -80,7 +80,7 @@ test("generated flags reach the request body in snake_case", async () => {
 });
 
 test("a keyless cap hit exits 3 with the JSON envelope", async () => {
-  const client = stubClient({
+  const client = clientHost({
     search: async () => {
       throw capError();
     },
@@ -98,7 +98,7 @@ test("a keyless cap hit exits 3 with the JSON envelope", async () => {
 });
 
 test("an API error exits 4", async () => {
-  const client = stubClient({
+  const client = clientHost({
     search: async () => {
       throw new Error("boom");
     },
@@ -108,7 +108,7 @@ test("an API error exits 4", async () => {
 });
 
 test.each([429, 432])("a usage limit (%i) prints the upgrade block and exits 3", async (status) => {
-  const client = stubClient({
+  const client = clientHost({
     search: async () => {
       throw new TavilyRequestError({
         status,
@@ -159,7 +159,7 @@ test("- reads one query from stdin", async () => {
 test("--max-chars defaults to 600 shared across queries and can be set", async () => {
   setTerminalOverride(false);
   const long = "w ".repeat(1000);
-  const client = stubClient({
+  const client = clientHost({
     search: async (body) => ({
       query: body.query,
       results: [{ title: "t", url: "u", content: long }],
@@ -186,7 +186,7 @@ test("multi-query runs each query with the shared options", async () => {
 
 // test_output.py::test_multi_query_keeps_keyless_cap_details
 test("multi-query keeps keyless cap details", async () => {
-  const client = stubClient({
+  const client = clientHost({
     search: async (body) => {
       if (body.query === "capped") throw capError();
       return { query: body.query, results: [] };
@@ -206,7 +206,7 @@ test("multi-query keeps keyless cap details", async () => {
 
 test("multi-query cap hit prints the cap message once to stderr and nothing to stdout", async () => {
   setTerminalOverride(false);
-  const client = stubClient({
+  const client = clientHost({
     search: async (body) => {
       if (body.query === "first") throw capError();
       return { query: body.query, results: [] };
@@ -227,7 +227,7 @@ test.each([
   ],
   ["another error", () => new Error("boom"), 4, "boom"],
 ])("multi-query where every query hits %s exits %i", async (_name, error, code, message) => {
-  const client = stubClient({
+  const client = clientHost({
     search: async () => {
       throw error();
     },
@@ -270,7 +270,7 @@ test("-o at a terminal only saves", async () => {
 
 test("human mode writes no spinner frames to stdout", async () => {
   setTerminalOverride(true);
-  const client = stubClient({
+  const client = clientHost({
     search: async () => {
       await new Promise((r) => setTimeout(r, 100));
       return fixture;
@@ -284,12 +284,12 @@ test("human mode writes no spinner frames to stdout", async () => {
 
 test("JSON mode shows no spinner", async () => {
   setTerminalOverride(true);
-  await runProgram(["search", "q", "--json"], stubClient({ search: async () => fixture }));
+  await runProgram(["search", "q", "--json"], clientHost({ search: async () => fixture }));
   expect(io.stderr()).toBe("");
 });
 
 test("search --help lists the flags in order", async () => {
-  expect(await runProgram(["search", "--help"], stubClient({}))).toBe(0);
+  expect(await runProgram(["search", "--help"], clientHost({}))).toBe(0);
   const stdout = io.stdout();
   const flags = [...stdout.matchAll(/^ {2}(?:-\w, )?(--[a-z-]+)/gm)].map((m) => m[1]);
   expect(flags).toEqual([
@@ -331,7 +331,7 @@ test("search --help lists the flags in order", async () => {
     "--json",
   ]);
   expect(stdout).toContain("ultra-fast");
-  expect(await runProgram(["help", "search"], stubClient({}))).toBe(0);
+  expect(await runProgram(["help", "search"], clientHost({}))).toBe(0);
   expect(io.stdout()).toBe(stdout + stdout);
 });
 
