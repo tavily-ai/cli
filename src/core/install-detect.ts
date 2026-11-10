@@ -52,6 +52,14 @@ const UNKNOWN_REASON =
 /** Forward slashes and lower case, so Windows and POSIX paths match with one set of rules. */
 const normalize = (p: string): string => p.replace(/\\/g, "/").toLowerCase();
 
+/** `normalize` for a directory: trailing slashes dropped, so `startsWith(\`${dir}/\`)` is exact. */
+function normalizeDir(p: string): string {
+  const dir = normalize(p);
+  let end = dir.length;
+  while (end > 0 && dir[end - 1] === "/") end--;
+  return dir.slice(0, end);
+}
+
 const blocked = (method: InstallMethod, reason: string): InstallInfo => ({
   method,
   command: null,
@@ -139,7 +147,7 @@ export function detectInstall(
     return blocked("source", SOURCE_REASON);
   }
 
-  const pnpmHome = env.PNPM_HOME ? normalize(env.PNPM_HOME).replace(/\/+$/, "") : null;
+  const pnpmHome = env.PNPM_HOME ? normalizeDir(env.PNPM_HOME) : null;
   let method: InstallMethod = "unknown";
   if (normReal.includes("/pnpm/global/") || (pnpmHome && normReal.startsWith(`${pnpmHome}/`))) {
     method = "pnpm";
@@ -150,7 +158,7 @@ export function detectInstall(
   } else {
     const root = npmRootGlobal();
     if (root) {
-      const normRoot = normalize(root).replace(/\/+$/, "");
+      const normRoot = normalizeDir(root);
       if (normReal.startsWith(`${normRoot}/`)) method = "npm";
     }
   }
