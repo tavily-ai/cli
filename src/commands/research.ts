@@ -190,38 +190,31 @@ export async function run(
     return;
   }
 
-  // Start, then poll unless --no-wait; `response` is the polled task (undefined on timeout).
-  const started = await invoke(cmd, ctx, call, async (client) => {
+  // The body returns the render step: rendering (and any `-o` write failure) stays outside `invoke`.
+  const render = await invoke(cmd, ctx, call, async (client) => {
     const result = await withSpinner("Starting research...", !json, () => client.research(body));
     // A synchronous result (the MCP endpoint returns one) needs no polling.
-    if (isDone(result) || result.content) return { result };
+    if (isDone(result) || result.content) {
+      return () => printResearchResult(result, { json, outputFile });
+    }
     const requestId = result.request_id;
     if (typeof requestId !== "string" || !requestId) {
       throw new Error(`Unexpected API response: ${JSON.stringify(result)}`);
     }
-    if (opts.wait === false) return { result, requestId };
+    if (opts.wait === false) {
+      const pending = { request_id: requestId, status: result.status ?? "pending" };
+      return () => emit(pending, { outputFile, pretty: false });
+    }
     const response = await waitForResult(client, requestId, {
       json,
       pollInterval: opts.pollInterval,
       timeout: opts.timeout,
       label: "Researching",
     });
-    return { result, requestId, response };
+    const hint = ` Resume with: tvly research poll ${sanitizeControl(requestId)}`;
+    return () => finishWait(response, requestId, { json, outputFile, timeout: opts.timeout }, hint);
   });
-  const { result, requestId } = started;
-  if (requestId === undefined) {
-    await printResearchResult(result, { json, outputFile });
-    return;
-  }
-  if (opts.wait === false) {
-    emit(
-      { request_id: requestId, status: result.status ?? "pending" },
-      { outputFile, pretty: false },
-    );
-    return;
-  }
-  const hint = ` Resume with: tvly research poll ${sanitizeControl(requestId)}`;
-  await finishWait(started.response, requestId, { json, outputFile, timeout: opts.timeout }, hint);
+  await render();
 }
 
 const STATUS_COLORS: Record<string, (s: string) => string> = {
@@ -236,8 +229,12 @@ export async function status(
   ctx: Context,
 ): Promise<void> {
   const json = resolveJson(cmd);
-  const call = { keyed: "research status", clientName: opts.clientName };
-  const response = await invoke(cmd, ctx, call, (client) => client.getResearch(requestId));
+  const response = await invoke(
+    cmd,
+    ctx,
+    { keyed: "research status", clientName: opts.clientName },
+    (client) => client.getResearch(requestId),
+  );
   if (json) {
     emit(response, { pretty: false });
     return;
@@ -263,14 +260,17 @@ export async function poll(
   const json = resolveJson(cmd);
   const outputFile = resolveOutput(opts.output, "research", requestId);
   const label = `Polling research ${sanitizeControl(requestId.slice(0, 8))}`;
-  const call = { keyed: "research poll", clientName: opts.clientName };
-  const response = await invoke(cmd, ctx, call, (client) =>
-    waitForResult(client, requestId, {
-      json,
-      pollInterval: opts.pollInterval,
-      timeout: opts.timeout,
-      label,
-    }),
+  const response = await invoke(
+    cmd,
+    ctx,
+    { keyed: "research poll", clientName: opts.clientName },
+    (client) =>
+      waitForResult(client, requestId, {
+        json,
+        pollInterval: opts.pollInterval,
+        timeout: opts.timeout,
+        label,
+      }),
   );
   await finishWait(response, requestId, { json, outputFile, timeout: opts.timeout });
 }

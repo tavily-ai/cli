@@ -12,7 +12,7 @@ import {
 } from "../src/core/search-flags.js";
 import type { Json } from "../src/core/tavily-client.js";
 import { setTerminalOverride } from "../src/ui/text.js";
-import { captureOutput } from "./helpers/capture.js";
+import { captureOutput, visible } from "./helpers/capture.js";
 import { runProgram, stubClient } from "./helpers/program.js";
 
 const io = captureOutput();
@@ -105,6 +105,30 @@ test("an API error exits 4", async () => {
   });
   expect(await runProgram(["search", "q", "--json"], client)).toBe(4);
   expect(JSON.parse(io.stdout())).toEqual({ error: "boom" });
+});
+
+test.each([429, 432])("a usage limit (%i) prints the upgrade block and exits 3", async (status) => {
+  const client = stubClient({
+    search: async () => {
+      throw new TavilyRequestError({
+        status,
+        body: null,
+        message: "Plan limit",
+        docs: "https://d/x",
+      });
+    },
+  });
+  expect(await runProgram(["search", "q"], client)).toBe(3);
+  expect(io.stdout()).toBe("");
+  expect(visible(io.stderr()).split("\n")).toEqual([
+    "",
+    "  > Plan limit",
+    "",
+    "  Upgrade your plan at tavily.com",
+    "  Docs: https://d/x",
+    "",
+    "",
+  ]);
 });
 
 test("usage errors exit 2", async () => {

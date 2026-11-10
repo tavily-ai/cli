@@ -82,12 +82,11 @@ export async function runMap(
 ): Promise<void> {
   const json = resolveJson(cmd);
   const outputFile = resolveOutput(opts.output, "map", hostOf(url));
-  const body = siteBody(url, opts);
   const response = await invoke(
     cmd,
     ctx,
     { label: `Mapping ${url}...`, keyed: "map", clientName: opts.clientName },
-    (client) => client.map(body),
+    (client) => client.map(siteBody(url, opts)),
   );
   await printMapResults(response, { json, outputFile });
 }
