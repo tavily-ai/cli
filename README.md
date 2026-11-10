@@ -73,6 +73,11 @@ tvly update
 
 Source (`npm link`) and direct-URL installations are detected and must be updated from their original source.
 
+The CLI also checks npm for a newer release at most once a day and prints a one-line notice on
+stderr when one exists. It stays silent under `--json`, when stderr is not a terminal, when run via
+npx, or when `CI` or `NO_UPDATE_NOTIFIER` is set. The check's state lives in
+`~/.tavily/update-check.json`.
+
 ### Shell installer
 
 ```bash
@@ -585,6 +590,7 @@ tvly set-default --claude --project
 | `TAVILY_PROJECT` | Project ID attached to requests |
 | `TAVILY_ORG_ID` | Organization ID attached to requests |
 | `TAVILY_HTTP_PROXY` / `TAVILY_HTTPS_PROXY` | Proxy URLs used for HTTP and HTTPS requests |
+| `NO_UPDATE_NOTIFIER` | Disable the once-a-day update notice (`CI` disables it too) |
 
 `TAVILY_HTTP_PROXY` and `TAVILY_HTTPS_PROXY` apply to API calls made with an
 API key. Browser login, OAuth-credentialed commands, and `tvly update` use

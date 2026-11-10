@@ -189,14 +189,14 @@ export function detectInstall(opts: DetectOptions = {}): InstallInfo {
   return { method, command: [manager, ...args], blockedReason: null };
 }
 
-/** The latest published Tavily CLI version, from the npm registry. */
-export async function fetchLatestVersion(fetchImpl: typeof fetch = fetch): Promise<string> {
+/** The latest published Tavily CLI version, from the npm registry; `signal` replaces the 10 s timeout. */
+export async function fetchLatestVersion(
+  fetchImpl: typeof fetch = fetch,
+  signal: AbortSignal = AbortSignal.timeout(10_000),
+): Promise<string> {
   let data: unknown;
   try {
-    const response = await fetchImpl(NPM_LATEST_URL, {
-      redirect: "manual",
-      signal: AbortSignal.timeout(10_000),
-    });
+    const response = await fetchImpl(NPM_LATEST_URL, { redirect: "manual", signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     data = await response.json();
   } catch {
