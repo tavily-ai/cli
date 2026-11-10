@@ -1,14 +1,14 @@
-import * as childProcess from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { isObject } from "../errors.js";
+import { type Exec, exec } from "../util/exec.js";
 
 type Sessions = Record<string, string>;
 
 interface GrandparentOptions {
-  spawnSync?: typeof childProcess.spawnSync;
+  exec?: Exec;
   platform?: NodeJS.Platform;
   readFile?: (p: string) => string;
 }
@@ -40,7 +40,7 @@ export function pidAlive(pid: number): boolean {
 
 export function grandparentPid(ppid: number, opts: GrandparentOptions = {}): number | null {
   const platform = opts.platform ?? process.platform;
-  const spawnSync = opts.spawnSync ?? childProcess.spawnSync;
+  const x = opts.exec ?? exec;
   const readFile = opts.readFile ?? ((p: string) => readFileSync(p, "utf8"));
   try {
     if (platform === "linux") {
@@ -63,13 +63,8 @@ export function grandparentPid(ppid: number, opts: GrandparentOptions = {}): num
             ],
           ]
         : ["ps", ["-o", "ppid=", "-p", String(ppid)]];
-    const res = spawnSync(cmd as string, args as string[], {
-      encoding: "utf8",
-      timeout: 2000,
-      windowsHide: true,
-    });
-    if (res.error || res.status !== 0) return null;
-    return parsePid(String(res.stdout));
+    const res = x.run(cmd as string, args as string[], { timeoutMs: 2000 });
+    return res.ok ? parsePid(res.stdout) : null;
   } catch {
     return null;
   }

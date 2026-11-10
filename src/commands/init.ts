@@ -1,5 +1,4 @@
 /** tvly init — install tvly globally, authenticate, install Tavily skills and workflows, and verify. */
-import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -31,7 +30,7 @@ import {
 import { ExitError, messageOf } from "../errors.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
-import { whichOnPath } from "../util/process.js";
+import { type Exec, exec } from "../util/exec.js";
 import { VERSION } from "../version.js";
 import { promptConfirm, resolveJson } from "./options.js";
 
@@ -40,10 +39,9 @@ export interface InitDeps extends ConfigOptions {
   openImpl?: (url: string) => void;
   installSkills?: (repo: string, agents: string[]) => Promise<SkillsInstallResult>;
   installMcp?: typeof installMcp;
-  which?: (name: string) => string | null;
+  exec?: Exec;
   stdinIsTTY?: boolean;
   confirm?: (question: string, defaultYes?: boolean) => Promise<boolean>;
-  spawnImpl?: typeof spawnSync;
   platform?: NodeJS.Platform;
 }
 
@@ -85,8 +83,8 @@ export async function run(
     cmd.error("error: Use either --skip-auth or --api-key, not both.");
   }
 
-  const which = deps.which ?? defaultWhich(deps.env ?? process.env);
-  const step = await installStep(opts, json, which, deps);
+  const x = deps.exec ?? exec;
+  const step = await installStep(opts, json, x, deps);
 
   const { agents, skills, workflows, mcp } = await selectAgents(requested, opts, json, deps);
   const result = emptyResult(skills ? agents : [], workflows ? agents : []);
@@ -145,15 +143,6 @@ export async function run(
 const INSTALL_INCOMPLETE =
   "Setup incomplete: global CLI installation failed. Other completed steps are preserved.";
 
-/** `which` over the user's PATH, without the npx cache entry npx prepends for this run. */
-function defaultWhich(env: NodeJS.ProcessEnv): (name: string) => string | null {
-  const PATH = (env.PATH ?? "")
-    .split(path.delimiter)
-    .filter((dir) => !dir.replace(/\\/g, "/").includes("/_npx/"))
-    .join(path.delimiter);
-  return (name) => whichOnPath(name, { ...env, PATH });
-}
-
 interface InstallStep {
   install: InitResult["install"];
   failed: boolean;
@@ -164,10 +153,10 @@ interface InstallStep {
 async function installStep(
   opts: InitOptions,
   json: boolean,
-  which: (name: string) => string | null,
+  x: Exec,
   deps: InitDeps,
 ): Promise<InstallStep> {
-  const onPath = () => which("tvly") !== null;
+  const onPath = () => x.which("tvly") !== null;
   const step: InstallStep = {
     install: { global: false, manager: null, on_path: onPath(), path_updated: false },
     failed: false,
@@ -182,17 +171,11 @@ async function installStep(
 
   const manager = detectPackageManager(deps.env ?? process.env);
   const platform = deps.platform ?? process.platform;
-  const win = platform === "win32";
   step.install.manager = manager;
   const [name, ...args] = MANAGER_COMMANDS[manager];
-  const bin = which(name as string);
-  const r = bin
-    ? (deps.spawnImpl ?? spawnSync)(win ? `"${bin}"` : bin, args, {
-        stdio: json ? ["ignore", 2, 2] : "inherit",
-        shell: win,
-      })
-    : null;
-  if (r?.status !== 0) {
+  const bin = x.which(name as string);
+  // The install streams to the terminal; a --json run keeps stdout for the result.
+  if (!bin || !x.run(bin, args, { inherit: json ? "stderr" : true }).ok) {
     err(`Failed to install @tavily/cli globally using ${manager}.`);
     err(`Retry: ${MANAGER_COMMANDS[manager].join(" ")}`);
     err(`You can run without a global install: ${MANAGER_RUNNERS[manager]} <command>`);
@@ -202,7 +185,7 @@ async function installStep(
   step.install.global = true;
   step.install.on_path = onPath();
   if (!step.install.on_path) {
-    step.pathNote = await fixPath(manager, interactive, which, deps, platform);
+    step.pathNote = await fixPath(manager, interactive, x, deps, platform);
     step.install.path_updated = step.pathNote !== null;
   }
   return step;
@@ -223,15 +206,11 @@ function rcFileForShell(shell: string, platform: NodeJS.Platform): string {
 async function fixPath(
   manager: GlobalManager,
   interactive: boolean,
-  which: (name: string) => string | null,
+  x: Exec,
   deps: InitDeps,
   platform: NodeJS.Platform,
 ): Promise<string | null> {
-  const bin = globalBinDir(manager, {
-    which,
-    platform,
-    ...(deps.spawnImpl ? { spawnSync: deps.spawnImpl } : {}),
-  });
+  const bin = globalBinDir(manager, { exec: x, platform });
   err("");
   err(`tvly was installed but isn't on your PATH yet.`);
   if (bin && platform === "win32") {

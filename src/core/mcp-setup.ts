@@ -5,8 +5,7 @@
  * holds a reference the client expands from its own environment at runtime, so the key itself
  * is never written; otherwise the config is the URL alone and the client signs in with OAuth.
  */
-import * as childProcess from "node:child_process";
-import { failureOf, runManager, whichOnPath } from "../util/process.js";
+import { exec } from "../util/exec.js";
 import { NPX_ADD_MCP_PACKAGE, runNpx, type SkillsDeps } from "./skills.js";
 
 export const MCP_SERVER_URL = "https://mcp.tavily.com/mcp/";
@@ -73,13 +72,13 @@ function addMcp(agent: string, header: string | undefined, deps: SkillsDeps): st
       "Adding the Tavily MCP server requires Node.js (npx). Install Node.js and rerun.",
     );
   }
-  return failureOf(completed);
+  return completed.failure;
 }
 
 /** `codex mcp add` reading the key from the environment at runtime. */
 function codexAdd(deps: SkillsDeps): string | null {
-  const which = deps.which ?? ((name: string) => whichOnPath(name, deps.env));
-  const codex = which("codex");
+  const x = deps.exec ?? exec;
+  const codex = x.which("codex");
   if (!codex) return "codex is not on PATH";
   const args = [
     "mcp",
@@ -90,6 +89,5 @@ function codexAdd(deps: SkillsDeps): string | null {
     "--bearer-token-env-var",
     KEY_VAR,
   ];
-  const win = (deps.platform ?? process.platform) === "win32";
-  return failureOf(runManager(deps.spawnImpl ?? childProcess.spawnSync, codex, args, win));
+  return x.run(codex, args, { timeoutMs: 300_000 }).failure;
 }

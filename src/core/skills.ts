@@ -4,13 +4,11 @@
  * Installs track the latest published skills and are counted on skills.sh.
  */
 
-import type { SpawnSyncReturns } from "node:child_process";
-import * as childProcess from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { failureOf, runManager, type SpawnFn, whichOnPath } from "../util/process.js";
+import { type Exec, type ExecResult, exec } from "../util/exec.js";
 import type { AGENT_NAMES } from "./agent-names.js";
 
 export const SKILLS_REPO = "tavily-ai/skills";
@@ -32,11 +30,7 @@ interface SkillsOptions {
 }
 
 export interface SkillsDeps extends SkillsOptions {
-  which?: (name: string) => string | null;
-  spawnImpl?: SpawnFn;
-  platform?: NodeJS.Platform;
-  execPath?: string;
-  existsSync?: (p: string) => boolean;
+  exec?: Exec;
 }
 
 /** Each supported agent's configuration directory under the current user's home. */
@@ -65,23 +59,11 @@ export function detectAgents(opts: SkillsOptions = {}): AgentName[] {
     .map(([name]) => name);
 }
 
-/**
- * Run npx with `args`, without a shell where possible so the arguments reach the package as
- * given. Null when npx is not on PATH.
- */
-export function runNpx(args: string[], deps: SkillsDeps): SpawnSyncReturns<string | Buffer> | null {
-  const which = deps.which ?? ((name: string) => whichOnPath(name, deps.env));
-  const npx = which("npx");
-  if (!npx) return null;
-  const spawnImpl = deps.spawnImpl ?? childProcess.spawnSync;
-  // Windows: spawning a .cmd with shell:false throws EINVAL on Node 20.12.2+,
-  // so run npm's npx-cli.js through node; fall back to the shell for the .cmd.
-  const win = (deps.platform ?? process.platform) === "win32";
-  const execPath = deps.execPath ?? process.execPath;
-  const npxCli = path.join(path.dirname(execPath), "node_modules", "npm", "bin", "npx-cli.js");
-  return win && (deps.existsSync ?? existsSync)(npxCli)
-    ? runManager(spawnImpl, execPath, [npxCli, ...args], false)
-    : runManager(spawnImpl, npx, args, win);
+/** Run npx with `args` (5-minute timeout). Null when npx is not on PATH. */
+export function runNpx(args: string[], deps: SkillsDeps): ExecResult | null {
+  const x = deps.exec ?? exec;
+  const npx = x.which("npx");
+  return npx ? x.run(npx, args, { timeoutMs: 300_000 }) : null;
 }
 
 /** Install every skill in a skills repo (Tavily skills or workflows) for the selected agents. */
@@ -119,8 +101,7 @@ export async function installAgentSkills(
       "Installing Tavily skills requires Node.js (npx). Install Node.js, or rerun with --skip-skills.",
     );
   }
-  const failure = failureOf(completed);
-  if (failure) throw new Error(`npx skills failed: ${failure}`);
+  if (completed.failure) throw new Error(`npx skills failed: ${completed.failure}`);
 
   return { agents, restartRequired: !isDeepStrictEqual(snapshotSkills(skillDirs), before) };
 }

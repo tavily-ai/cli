@@ -1,8 +1,7 @@
 /** Work out which package manager owns the running CLI, and how to upgrade it. */
-import * as childProcess from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
-import { whichOnPath } from "../util/process.js";
+import { type Exec, exec } from "../util/exec.js";
 import { compareVersions } from "../util/semver.js";
 
 const NPM_LATEST_URL = "https://registry.npmjs.org/@tavily/cli/latest";
@@ -21,7 +20,7 @@ export interface DetectOptions {
   realpath?: (p: string) => string;
   npmRootGlobal?: () => string | null;
   env?: NodeJS.ProcessEnv;
-  which?: (name: string) => string | null;
+  exec?: Exec;
 }
 
 export type GlobalManager = "npm" | "pnpm" | "yarn" | "bun";
@@ -67,8 +66,7 @@ const blocked = (method: InstallMethod, reason: string): InstallInfo => ({
 });
 
 interface ManagerDeps {
-  which: (name: string) => string | null;
-  spawnSync?: typeof childProcess.spawnSync;
+  exec: Exec;
   platform?: NodeJS.Platform;
 }
 
@@ -85,26 +83,14 @@ export function globalBinDir(manager: GlobalManager, deps: ManagerDeps): string 
 }
 
 /**
- * Run a package manager through its resolved PATH entry and return trimmed stdout. Windows needs
- * `shell: true` for the .cmd shim, and a bare name there would also find a planted `npm.cmd` in
- * the current directory.
+ * Run a package manager through its resolved PATH entry and return trimmed stdout. A bare name
+ * on Windows would also find a planted `npm.cmd` in the current directory.
  */
 function managerOutput(manager: string, args: string[], deps: ManagerDeps): string | null {
-  const bin = deps.which(manager);
+  const bin = deps.exec.which(manager);
   if (!bin) return null;
-  const win = (deps.platform ?? process.platform) === "win32";
-  try {
-    const r = (deps.spawnSync ?? childProcess.spawnSync)(win ? `"${bin}"` : bin, args, {
-      encoding: "utf8",
-      timeout: 15_000,
-      windowsHide: true,
-      shell: win,
-    });
-    if (r.error || r.status !== 0) return null;
-    return String(r.stdout).trim() || null;
-  } catch {
-    return null;
-  }
+  const r = deps.exec.run(bin, args, { timeoutMs: 15_000 });
+  return r.ok ? r.stdout.trim() || null : null;
 }
 
 /** Walk up from a file to the directory holding the nearest package.json, or null if there is none. */
@@ -148,7 +134,7 @@ export function detectInstall(opts: DetectOptions = {}): InstallInfo {
   const real = safeRealpath(raw, opts.realpath ?? realpathSync);
   const normReal = normalize(real);
   const normRaw = normalize(raw);
-  const which = opts.which ?? ((name: string) => whichOnPath(name, env));
+  const x = opts.exec ?? exec;
 
   if (normReal.includes("/_npx/")) return blocked("npx", NPX_REASON);
 
@@ -169,7 +155,7 @@ export function detectInstall(opts: DetectOptions = {}): InstallInfo {
   } else if (normReal.includes("/.bun/install/global/")) {
     method = "bun";
   } else {
-    const root = (opts.npmRootGlobal ?? (() => npmRootGlobalDefault({ which })))();
+    const root = (opts.npmRootGlobal ?? (() => npmRootGlobalDefault({ exec: x })))();
     if (root) {
       const normRoot = normalize(root).replace(/\/+$/, "");
       if (normReal.startsWith(`${normRoot}/`)) method = "npm";
@@ -177,7 +163,7 @@ export function detectInstall(opts: DetectOptions = {}): InstallInfo {
   }
 
   if (method === "unknown") return blocked("unknown", UNKNOWN_REASON);
-  const manager = which(method);
+  const manager = x.which(method);
   if (!manager) {
     return blocked(
       method,

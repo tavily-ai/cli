@@ -1,12 +1,11 @@
 /** tvly update — check for or install the latest Tavily CLI release. */
-import * as childProcess from "node:child_process";
 import { realpathSync } from "node:fs";
 import type { Command } from "commander";
 import { detectInstall, fetchLatestVersion, type InstallInfo } from "../core/install-detect.js";
 import { ExitError, messageOf } from "../errors.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
-import { runManager, type SpawnFn } from "../util/process.js";
+import { type Exec, exec } from "../util/exec.js";
 import { compareVersions, isNewer } from "../util/semver.js";
 import { VERSION } from "../version.js";
 import { resolveJson } from "./options.js";
@@ -15,10 +14,9 @@ export interface UpdateDeps {
   currentVersion?: string;
   fetchImpl?: typeof fetch;
   detectInstall?: () => InstallInfo;
-  spawnImpl?: SpawnFn;
+  exec?: Exec;
   argv1?: string;
   realpath?: (p: string) => string;
-  platform?: NodeJS.Platform;
 }
 
 interface UpdateOptions {
@@ -56,31 +54,14 @@ export async function run(opts: UpdateOptions, cmd: Command, deps: UpdateDeps = 
 
   if (!json) out(`Updating Tavily CLI via ${install.method}...`);
 
-  const spawnImpl: SpawnFn = deps.spawnImpl ?? childProcess.spawnSync;
-  // The manager's resolved path; Windows runs its .cmd shim through the shell.
+  const x = deps.exec ?? exec;
   const [file = "", ...args] = install.command;
-  const completed = runManager(
-    spawnImpl,
-    file,
-    args,
-    (deps.platform ?? process.platform) === "win32",
-  );
-  if (completed.error) {
-    return fail("update", completed.error.message, 1, json);
-  }
-  if (completed.status !== 0) {
-    const detail =
-      String(completed.stderr ?? "").trim() ||
-      String(completed.stdout ?? "").trim() ||
-      (completed.status === null
-        ? `Terminated by signal ${completed.signal}.`
-        : `Exited with status ${completed.status}.`);
-    return fail("update", detail.slice(-2000), 1, json);
-  }
+  const completed = x.run(file, args, { timeoutMs: 300_000 });
+  if (completed.failure) return fail("update", completed.failure, 1, json);
 
   let installed: string;
   try {
-    installed = installedVersion(deps, spawnImpl);
+    installed = installedVersion(deps, x);
     if (isNewer(latest, installed)) {
       let message =
         `The package manager completed, but Tavily CLI is still ${installed}; latest is ${latest}. ` +
@@ -102,30 +83,20 @@ export async function run(opts: UpdateOptions, cmd: Command, deps: UpdateDeps = 
 }
 
 /** Ask the (possibly upgraded) installed binary for its version: `node <entry> --version`. */
-function installedVersion(deps: UpdateDeps, spawnImpl: SpawnFn): string {
+function installedVersion(deps: UpdateDeps, x: Exec): string {
   const realpath = deps.realpath ?? realpathSync;
   const entry = realpath(deps.argv1 ?? process.argv[1] ?? "");
-  const r = spawnImpl(process.execPath, [entry, "--version"], {
-    encoding: "utf8",
-    timeout: 30_000,
-    windowsHide: true,
-  });
-  if (r.error)
-    throw new Error(`Could not read the installed Tavily CLI version: ${r.error.message}`);
-  const token = sanitizeControl(r.stdout ?? "")
-    .trim()
-    .split(/\s+/)
-    .pop();
-  if (r.status !== 0 || !token) {
-    throw new Error("Could not read the installed Tavily CLI version.");
-  }
+  const r = x.run(process.execPath, [entry, "--version"], { timeoutMs: 30_000 });
+  if (!r.ok) throw new Error(`Could not read the installed Tavily CLI version: ${r.failure}`);
+  const token = sanitizeControl(r.stdout).trim().split(/\s+/).pop();
+  if (!token) throw new Error("Could not read the installed Tavily CLI version.");
   return token;
 }
 
 /** A bounded package-manager hint, without echoing arbitrary command output. */
-function managerHint(completed: { stderr?: unknown; stdout?: unknown }): string | null {
+function managerHint(completed: { stderr: string; stdout: string }): string | null {
   for (const output of [completed.stderr, completed.stdout]) {
-    const lines = String(output ?? "").split(/\r?\n/);
+    const lines = output.split(/\r?\n/);
     for (const line of lines.reverse()) {
       const candidate = sanitizeControl(line).trim();
       if (candidate.toLowerCase().startsWith("hint:")) return candidate.slice(0, 1000);

@@ -6,6 +6,7 @@ import { type InitDeps, run } from "../src/commands/init.js";
 import { detectPackageManager } from "../src/core/install-detect.js";
 import { SKILLS_REPO, WORKFLOWS_REPO } from "../src/core/skills.js";
 import { captureOutput } from "./helpers/capture.js";
+import { fakeExec } from "./helpers/exec.js";
 import { runProgram, stubClient } from "./helpers/program.js";
 
 const io = captureOutput();
@@ -32,7 +33,7 @@ describe("init", () => {
       home,
       env: { TAVILY_API_KEY: "tvly-test" },
       installSkills,
-      which: () => "/usr/bin/tvly",
+      exec: fakeExec(),
     });
     expect(code).toBe(0);
     expect(installSkills).not.toHaveBeenCalled();
@@ -45,7 +46,7 @@ describe("init", () => {
       home,
       env: { TAVILY_API_KEY: "tvly-test" },
       installSkills: async (_repo, agents) => ({ agents, restartRequired: true }),
-      which: () => "/usr/bin/tvly",
+      exec: fakeExec(),
     });
     expect(code).toBe(0);
     const output = stdoutJson();
@@ -62,7 +63,7 @@ describe("init", () => {
       home,
       env: {},
       stdinIsTTY: false,
-      which: () => "/usr/bin/tvly",
+      exec: fakeExec(),
     });
     expect(code).toBe(3);
     const output = stdoutJson();
@@ -75,7 +76,7 @@ describe("init", () => {
     const code = await runInit(["--no-browser", "--skip-skills", "--json"], {
       home,
       env: {},
-      which: () => "/usr/bin/tvly",
+      exec: fakeExec(),
       login: async (opts) => {
         opts.onStatus?.("https://mcp.tavily.com/authorize?x=\x1b[2Jy");
         return {
@@ -104,7 +105,7 @@ describe("init", () => {
   test("live search failure exits four", async () => {
     const code = await runInit(
       ["--skip-auth", "--skip-skills", "--json"],
-      { home, env: {}, which: () => "/usr/bin/tvly" },
+      { home, env: {}, exec: fakeExec() },
       stubClient({ search: async () => ({}) }),
     );
     expect(code).toBe(4);
@@ -128,7 +129,7 @@ describe("init", () => {
       home,
       env: { TAVILY_API_KEY: "tvly-test" },
       installSkills: async (_repo, agents) => ({ agents, restartRequired: false }),
-      which: () => "/usr/bin/tvly",
+      exec: fakeExec(),
     });
     expect(ok).toBe(0);
     expect(stdoutJson().skills.agents).toEqual(["codex"]);
@@ -144,7 +145,7 @@ describe("init", () => {
     const code = await runInit(["--skip-skills", "--skip-auth", "--json"], {
       home,
       env: {},
-      which: () => "/usr/bin/tvly",
+      exec: fakeExec(),
     });
     expect(code).toBe(0);
     const output = stdoutJson();
@@ -172,7 +173,7 @@ describe("init workflows", () => {
     const deps: InitDeps = {
       home,
       env: { TAVILY_API_KEY: "tvly-test" },
-      which: () => "/usr/bin/tvly",
+      exec: fakeExec(),
       stdinIsTTY: true,
       confirm,
       installSkills,
@@ -264,7 +265,7 @@ describe("init mcp", () => {
     const deps: InitDeps = {
       home,
       env: { TAVILY_API_KEY: "tvly-test" },
-      which: () => "/usr/bin/tvly",
+      exec: fakeExec(),
       stdinIsTTY: true,
       confirm,
       installSkills: async (_repo, agents) => ({ agents, restartRequired: false }),
@@ -300,51 +301,50 @@ describe("init mcp", () => {
 });
 
 describe("init global install", () => {
-  function setup(opts: { tvly?: boolean; answer?: boolean; status?: number; tty?: boolean } = {}) {
+  function setup(opts: { tvly?: boolean; answer?: boolean; failed?: boolean; tty?: boolean } = {}) {
     const confirm = vi.fn(async () => opts.answer ?? true);
-    const spawnImpl = vi.fn((_cmd: string, args: string[]) =>
-      args[0] === "prefix" ? { status: 0, stdout: "/opt/npm\n" } : { status: opts.status ?? 0 },
-    );
+    const exec = fakeExec({
+      which: (name) => (name === "tvly" && !opts.tvly ? null : `/usr/bin/${name}`),
+      run: (_bin, args) =>
+        args[0] === "prefix"
+          ? { stdout: "/opt/npm\n" }
+          : opts.failed
+            ? { ok: false, failure: "exit code 1" }
+            : undefined,
+    });
     const deps: InitDeps = {
       home,
       env: { TAVILY_API_KEY: "tvly-test", SHELL: "/bin/zsh" },
       platform: "darwin",
-      which: (name) => (name === "tvly" && !opts.tvly ? null : `/usr/bin/${name}`),
+      exec,
       stdinIsTTY: opts.tty ?? true,
       confirm,
-      spawnImpl: spawnImpl as unknown as NonNullable<InitDeps["spawnImpl"]>,
     };
-    return { deps, confirm, spawnImpl };
+    return { deps, confirm, exec };
   }
 
-  test("installs globally with the resolved npm when confirmed", async () => {
-    const { deps, confirm, spawnImpl } = setup({ tvly: false });
+  const INSTALL = { bin: "/usr/bin/npm", args: ["install", "-g", "@tavily/cli@latest"] };
+
+  test("installs globally with the resolved npm, streaming its output, when confirmed", async () => {
+    const { deps, confirm, exec } = setup({ tvly: false });
     expect(await runInit(["--skip-skills"], deps)).toBe(0);
     expect(confirm).toHaveBeenCalledWith("Install tvly globally?");
-    expect(spawnImpl).toHaveBeenCalledWith(
-      "/usr/bin/npm",
-      ["install", "-g", "@tavily/cli@latest"],
-      expect.objectContaining({ stdio: "inherit" }),
-    );
+    expect(exec.calls[0]).toEqual({ ...INSTALL, opts: { inherit: true } });
     expect(io.stdout()).toContain("tvly installed globally (npm)");
   });
 
   test("declining the install continues and then fails the cli check", async () => {
-    const { deps, spawnImpl } = setup({ tvly: false, answer: false });
+    const { deps, exec } = setup({ tvly: false, answer: false });
     expect(await runInit(["--skip-skills"], deps)).toBe(1);
-    expect(spawnImpl).not.toHaveBeenCalled();
+    expect(exec.calls).toEqual([]);
     expect(io.stdout()).toContain("tvly is not available on PATH.");
   });
 
-  test("--yes in a non-interactive run installs without asking", async () => {
-    const { deps, confirm, spawnImpl } = setup({ tvly: false, tty: false });
+  test("--yes in a non-interactive --json run installs without asking, keeping stdout", async () => {
+    const { deps, confirm, exec } = setup({ tvly: false, tty: false });
     expect(await runInit(["--skip-skills", "--yes", "--json"], deps)).toBe(0);
     expect(confirm).not.toHaveBeenCalled();
-    expect(spawnImpl).toHaveBeenCalledWith(
-      "/usr/bin/npm",
-      ["install", "-g", "@tavily/cli@latest"],
-      expect.anything(),
-    );
+    expect(exec.calls[0]).toEqual({ ...INSTALL, opts: { inherit: "stderr" } });
     expect(stdoutJson().install).toMatchObject({ global: true, manager: "npm" });
   });
 
@@ -359,9 +359,9 @@ describe("init global install", () => {
   });
 
   test("a failed install continues and exits one", async () => {
-    const { deps, spawnImpl } = setup({ tvly: false, status: 1 });
+    const { deps, exec } = setup({ tvly: false, failed: true });
     expect(await runInit(["--skip-skills"], deps)).toBe(1);
-    expect(spawnImpl).toHaveBeenCalledTimes(1);
+    expect(exec.calls).toHaveLength(1);
     expect(io.stderr()).toContain("Failed to install @tavily/cli globally using npm.");
     expect(io.stderr()).toContain(
       "You can run without a global install: npx @tavily/cli <command>",
