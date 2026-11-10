@@ -18,8 +18,10 @@ beforeEach(() => {
 const okClient = stubClient({ search: async () => ({ results: [] }) });
 
 /** Run the real program in-process with `init` bound to `deps`; returns the exit code. */
-const runInit = (argv: string[], deps: InitDeps) =>
-  runProgram(["init", ...argv], undefined, { actions: { init: (o, c) => run(o, c, deps) } });
+const runInit = (argv: string[], deps: InitDeps, client = okClient) =>
+  runProgram(["init", ...argv], client, {
+    actions: { init: (o, c) => run(o, c, { resolveClient: async () => client }, deps) },
+  });
 
 const stdoutJson = () => JSON.parse(io.stdout());
 
@@ -31,7 +33,6 @@ describe("init", () => {
       env: { TAVILY_API_KEY: "tvly-test" },
       installSkills,
       which: () => "/usr/bin/tvly",
-      client: okClient,
     });
     expect(code).toBe(0);
     expect(installSkills).not.toHaveBeenCalled();
@@ -45,7 +46,6 @@ describe("init", () => {
       env: { TAVILY_API_KEY: "tvly-test" },
       installSkills: async (_repo, agents) => ({ agents, restartRequired: true }),
       which: () => "/usr/bin/tvly",
-      client: okClient,
     });
     expect(code).toBe(0);
     const output = stdoutJson();
@@ -63,7 +63,6 @@ describe("init", () => {
       env: {},
       stdinIsTTY: false,
       which: () => "/usr/bin/tvly",
-      client: okClient,
     });
     expect(code).toBe(3);
     const output = stdoutJson();
@@ -77,7 +76,6 @@ describe("init", () => {
       home,
       env: {},
       which: () => "/usr/bin/tvly",
-      client: okClient,
       login: async (opts) => {
         opts.onStatus?.("https://mcp.tavily.com/authorize?x=\x1b[2Jy");
         return {
@@ -104,12 +102,11 @@ describe("init", () => {
   });
 
   test("live search failure exits four", async () => {
-    const code = await runInit(["--skip-auth", "--skip-skills", "--json"], {
-      home,
-      env: {},
-      which: () => "/usr/bin/tvly",
-      client: stubClient({ search: async () => ({}) }),
-    });
+    const code = await runInit(
+      ["--skip-auth", "--skip-skills", "--json"],
+      { home, env: {}, which: () => "/usr/bin/tvly" },
+      stubClient({ search: async () => ({}) }),
+    );
     expect(code).toBe(4);
     expect(stdoutJson().error.stage).toBe("live_search");
   });
@@ -132,7 +129,6 @@ describe("init", () => {
       env: { TAVILY_API_KEY: "tvly-test" },
       installSkills: async (_repo, agents) => ({ agents, restartRequired: false }),
       which: () => "/usr/bin/tvly",
-      client: okClient,
     });
     expect(ok).toBe(0);
     expect(stdoutJson().skills.agents).toEqual(["codex"]);
@@ -149,7 +145,6 @@ describe("init", () => {
       home,
       env: {},
       which: () => "/usr/bin/tvly",
-      client: okClient,
     });
     expect(code).toBe(0);
     const output = stdoutJson();
@@ -178,7 +173,6 @@ describe("init workflows", () => {
       home,
       env: { TAVILY_API_KEY: "tvly-test" },
       which: () => "/usr/bin/tvly",
-      client: okClient,
       stdinIsTTY: true,
       confirm,
       installSkills,
@@ -271,7 +265,6 @@ describe("init mcp", () => {
       home,
       env: { TAVILY_API_KEY: "tvly-test" },
       which: () => "/usr/bin/tvly",
-      client: okClient,
       stdinIsTTY: true,
       confirm,
       installSkills: async (_repo, agents) => ({ agents, restartRequired: false }),
@@ -317,7 +310,6 @@ describe("init global install", () => {
       env: { TAVILY_API_KEY: "tvly-test", SHELL: "/bin/zsh" },
       platform: "darwin",
       which: (name) => (name === "tvly" && !opts.tvly ? null : `/usr/bin/${name}`),
-      client: okClient,
       stdinIsTTY: opts.tty ?? true,
       confirm,
       spawnImpl: spawnImpl as unknown as NonNullable<InitDeps["spawnImpl"]>,

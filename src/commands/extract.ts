@@ -1,12 +1,12 @@
 /** tvly extract — extract content from URLs via the Tavily API. */
 import type { Command } from "commander";
-import { getClientOrKeyless } from "../core/client-factory.js";
+import type { Context } from "../context.js";
 import { resolveOutput } from "../ui/render/emit.js";
 import { printExtractResults } from "../ui/render/extract.js";
-import { withSpinner } from "../ui/spinner.js";
 import { domainOf } from "../ui/text.js";
+import { invoke } from "./invoke.js";
 import { resolveJson } from "./options.js";
-import { definedSnake, runWithApiErrors } from "./shared.js";
+import { definedSnake } from "./shared.js";
 
 const MAX_URLS = 20;
 
@@ -21,7 +21,12 @@ interface ExtractOptions {
   clientName?: string;
 }
 
-export async function run(urls: string[], opts: ExtractOptions, cmd: Command): Promise<void> {
+export async function run(
+  urls: string[],
+  opts: ExtractOptions,
+  cmd: Command,
+  ctx: Context,
+): Promise<void> {
   const json = resolveJson(cmd);
   if (urls.length > MAX_URLS) cmd.error(`error: Maximum ${MAX_URLS} URLs per request.`);
   const outputFile = resolveOutput(opts.output, "extract", domainOf(urls[0] ?? ""));
@@ -38,10 +43,12 @@ export async function run(urls: string[], opts: ExtractOptions, cmd: Command): P
     ]),
   };
 
-  const response = await runWithApiErrors(json, async () => {
-    const client = await getClientOrKeyless(opts.clientName);
-    const label = `Extracting ${urls.length} URL${urls.length > 1 ? "s" : ""}...`;
-    return withSpinner(label, !json, () => client.extract(body));
-  });
+  const label = `Extracting ${urls.length} URL${urls.length > 1 ? "s" : ""}...`;
+  const response = await invoke(
+    cmd,
+    ctx,
+    { label, keyed: false, clientName: opts.clientName },
+    (client) => client.extract(body),
+  );
   await printExtractResults(response, { json, outputFile });
 }

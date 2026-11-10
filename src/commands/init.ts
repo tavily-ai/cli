@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { Command } from "commander";
-import { getClientOrKeyless } from "../core/client-factory.js";
+import type { Context } from "../context.js";
 import {
   authMethod,
   type ConfigOptions,
@@ -28,7 +28,6 @@ import {
   type SkillsInstallResult,
   WORKFLOWS_REPO,
 } from "../core/skills.js";
-import type { TavilyClientLike } from "../core/tavily-client.js";
 import { ExitError, messageOf } from "../errors.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
@@ -44,7 +43,6 @@ export interface InitDeps extends ConfigOptions {
   which?: (name: string) => string | null;
   stdinIsTTY?: boolean;
   confirm?: (question: string, defaultYes?: boolean) => Promise<boolean>;
-  client?: TavilyClientLike;
   spawnImpl?: typeof spawnSync;
   platform?: NodeJS.Platform;
 }
@@ -74,7 +72,12 @@ interface InitResult {
   error?: { stage: string; message: string };
 }
 
-export async function run(opts: InitOptions, cmd: Command, deps: InitDeps = {}): Promise<void> {
+export async function run(
+  opts: InitOptions,
+  cmd: Command,
+  ctx: Context,
+  deps: InitDeps = {},
+): Promise<void> {
   const json = resolveJson(cmd);
   const requested = [...new Set((opts.agent ?? []).map((name) => name.toLowerCase()))];
   if (opts.all && requested.length) cmd.error("error: Use either --all or --agent, not both.");
@@ -124,7 +127,7 @@ export async function run(opts: InitOptions, cmd: Command, deps: InitDeps = {}):
   }
 
   try {
-    result.verification.live_search = await verifyLiveSearch(deps);
+    result.verification.live_search = await verifyLiveSearch(ctx, deps);
   } catch (e) {
     return fail(result, "live_search", messageOf(e), 4, json);
   }
@@ -312,8 +315,8 @@ async function ensureAuth(
   return { authenticated: true, method: "oauth" };
 }
 
-async function verifyLiveSearch(deps: InitDeps): Promise<boolean> {
-  const client = deps.client ?? (await getClientOrKeyless("tavily-cli-init"));
+async function verifyLiveSearch(ctx: Context, deps: InitDeps): Promise<boolean> {
+  const client = await ctx.resolveClient(await getApiKey(deps), "tavily-cli-init");
   const response = await client.search({ query: "Tavily Search API", max_results: 1 });
   return Array.isArray((response as { results?: unknown } | null)?.results);
 }

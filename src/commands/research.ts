@@ -1,7 +1,7 @@
 /** tvly research — deep research via the Tavily API (async: run/status/poll, or a live stream). */
 import { readFileSync } from "node:fs";
 import type { Command } from "commander";
-import { getKeyedClient } from "../core/client-factory.js";
+import type { Context } from "../context.js";
 import type { Json, TavilyClientLike } from "../core/tavily-client.js";
 import { messageOf } from "../errors.js";
 import { emit, resolveOutput } from "../ui/render/emit.js";
@@ -9,8 +9,9 @@ import { printResearchResult } from "../ui/render/research.js";
 import { spinner, withSpinner } from "../ui/spinner.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
+import { invoke } from "./invoke.js";
 import { resolveJson } from "./options.js";
-import { handleApiError, readQueryArg, runWithApiErrors } from "./shared.js";
+import { readQueryArg } from "./shared.js";
 
 export interface PollOptions {
   pollInterval: number;
@@ -53,15 +54,10 @@ export function normalizeResearchArgs(args: string[]): string[] {
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const isDone = (r: Json) => r.status === "completed" || r.status === "failed";
 
-async function connect(cmd: Command, label: string, clientName: string | undefined) {
-  const json = resolveJson(cmd);
-  return { json, client: await getKeyedClient(label, { json, clientName }) };
-}
-
 /**
  * Poll every `pollInterval` seconds (at least 1) until the task completes or fails; undefined once
  * `timeout` seconds of wall time pass. Ticks every second so human mode's elapsed-time spinner stays
- * current; the spinner stops before any API error reaches the caller's `runWithApiErrors`.
+ * current; the spinner stops before any API error reaches `invoke`.
  */
 async function waitForResult(
   client: TavilyClientLike,
@@ -165,7 +161,9 @@ export async function run(
   query: string | undefined,
   opts: RunOptions,
   cmd: Command,
+  ctx: Context,
 ): Promise<void> {
+  const json = resolveJson(cmd);
   const input = readQueryArg(query, cmd);
   const outputFile = resolveOutput(opts.output, "research", input);
 
@@ -180,10 +178,10 @@ export async function run(
   }
   if (opts.citationFormat !== undefined) body.citation_format = opts.citationFormat;
 
-  const { json, client } = await connect(cmd, "research", opts.clientName);
+  const call = { keyed: "research", clientName: opts.clientName };
 
   if (opts.stream) {
-    await runWithApiErrors(json, async () => {
+    await invoke(cmd, ctx, call, async (client) => {
       const events = streamEvents(await client.researchStream(body));
       if (!json) return renderStream(events, outputFile);
       // One JSON line per event: valid NDJSON with control bytes escaped by JSON.stringify.
@@ -192,38 +190,31 @@ export async function run(
     return;
   }
 
-  const result = await runWithApiErrors(json, () =>
-    withSpinner("Starting research...", !json, () => client.research(body)),
-  );
-  // A synchronous result (the MCP endpoint returns one) needs no polling.
-  if (isDone(result) || result.content) {
-    await printResearchResult(result, { json, outputFile });
-    return;
-  }
-
-  const requestId = result.request_id;
-  if (typeof requestId !== "string" || !requestId) {
-    handleApiError(new Error(`Unexpected API response: ${JSON.stringify(result)}`), json);
-  }
-
-  if (opts.wait === false) {
-    emit(
-      { request_id: requestId, status: result.status ?? "pending" },
-      { outputFile, pretty: false },
-    );
-    return;
-  }
-
-  const response = await runWithApiErrors(json, () =>
-    waitForResult(client, requestId, {
+  // The body returns the render step: rendering (and any `-o` write failure) stays outside `invoke`.
+  const render = await invoke(cmd, ctx, call, async (client) => {
+    const result = await withSpinner("Starting research...", !json, () => client.research(body));
+    // A synchronous result (the MCP endpoint returns one) needs no polling.
+    if (isDone(result) || result.content) {
+      return () => printResearchResult(result, { json, outputFile });
+    }
+    const requestId = result.request_id;
+    if (typeof requestId !== "string" || !requestId) {
+      throw new Error(`Unexpected API response: ${JSON.stringify(result)}`);
+    }
+    if (opts.wait === false) {
+      const pending = { request_id: requestId, status: result.status ?? "pending" };
+      return () => emit(pending, { outputFile, pretty: false });
+    }
+    const response = await waitForResult(client, requestId, {
       json,
       pollInterval: opts.pollInterval,
       timeout: opts.timeout,
       label: "Researching",
-    }),
-  );
-  const hint = ` Resume with: tvly research poll ${sanitizeControl(requestId)}`;
-  await finishWait(response, requestId, { json, outputFile, timeout: opts.timeout }, hint);
+    });
+    const hint = ` Resume with: tvly research poll ${sanitizeControl(requestId)}`;
+    return () => finishWait(response, requestId, { json, outputFile, timeout: opts.timeout }, hint);
+  });
+  await render();
 }
 
 const STATUS_COLORS: Record<string, (s: string) => string> = {
@@ -235,9 +226,15 @@ export async function status(
   requestId: string,
   opts: { clientName?: string },
   cmd: Command,
+  ctx: Context,
 ): Promise<void> {
-  const { json, client } = await connect(cmd, "research status", opts.clientName);
-  const response = await runWithApiErrors(json, () => client.getResearch(requestId));
+  const json = resolveJson(cmd);
+  const response = await invoke(
+    cmd,
+    ctx,
+    { keyed: "research status", clientName: opts.clientName },
+    (client) => client.getResearch(requestId),
+  );
   if (json) {
     emit(response, { pretty: false });
     return;
@@ -254,17 +251,26 @@ export async function status(
   }
 }
 
-export async function poll(requestId: string, opts: PollOptions, cmd: Command): Promise<void> {
+export async function poll(
+  requestId: string,
+  opts: PollOptions,
+  cmd: Command,
+  ctx: Context,
+): Promise<void> {
+  const json = resolveJson(cmd);
   const outputFile = resolveOutput(opts.output, "research", requestId);
-  const { json, client } = await connect(cmd, "research poll", opts.clientName);
   const label = `Polling research ${sanitizeControl(requestId.slice(0, 8))}`;
-  const response = await runWithApiErrors(json, () =>
-    waitForResult(client, requestId, {
-      json,
-      pollInterval: opts.pollInterval,
-      timeout: opts.timeout,
-      label,
-    }),
+  const response = await invoke(
+    cmd,
+    ctx,
+    { keyed: "research poll", clientName: opts.clientName },
+    (client) =>
+      waitForResult(client, requestId, {
+        json,
+        pollInterval: opts.pollInterval,
+        timeout: opts.timeout,
+        label,
+      }),
   );
   await finishWait(response, requestId, { json, outputFile, timeout: opts.timeout });
 }

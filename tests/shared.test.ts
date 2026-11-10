@@ -3,13 +3,12 @@ import {
   keylessLimitErrorFromEnvelope,
   type TavilyContinuationPath,
   TavilyKeylessLimitError,
-  TavilyRequestError,
 } from "@tavily/core";
 import { Command } from "commander";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { handleOauthRefreshError } from "../src/commands/common.js";
+import { handleOauthRefreshError } from "../src/commands/credential.js";
 import { addClientNameOption, addOutputOption } from "../src/commands/options.js";
-import { handleApiError, readQueryArg, runWithApiErrors } from "../src/commands/shared.js";
+import { readQueryArg } from "../src/commands/shared.js";
 import { authSource } from "../src/core/config.js";
 import { ExitError, OAuthError } from "../src/errors.js";
 import {
@@ -43,50 +42,6 @@ const capError = () =>
     window: "day",
   });
 
-test("handleApiError human mode prints to stderr and exits 4", () => {
-  expect(exitCode(() => handleApiError(new Error("bo\x1b[2Jom"), false))).toBe(4);
-  expect(visible(io.stderr())).toBe("  > Error: bo[2Jom\n");
-  expect(io.stdout()).toBe("");
-});
-
-test("limit statuses 429 and 432 print the upgrade block and exit 3", () => {
-  for (const status of [429, 432]) {
-    const before = io.stderr().length;
-    const e = new TavilyRequestError({
-      status,
-      body: null,
-      message: "Plan limit",
-      docs: "https://docs.tavily.com/x",
-    });
-    expect(exitCode(() => handleApiError(e, false))).toBe(3);
-    expect(visible(io.stderr().slice(before)).split("\n")).toEqual([
-      "",
-      "  > Plan limit",
-      "",
-      "  Upgrade your plan at tavily.com",
-      "  Docs: https://docs.tavily.com/x",
-      "",
-      "",
-    ]);
-  }
-  const limit = new TavilyRequestError({ status: 432, body: null, message: "m" });
-  expect(exitCode(() => handleApiError(limit, true))).toBe(3);
-  expect(JSON.parse(io.stdout())).toEqual({ error: "m" });
-});
-
-test("auth statuses 401 and 403 keep the API message and exit 3", () => {
-  const message = "Unauthorized: missing or invalid API key.";
-  for (const status of [401, 403]) {
-    const e = new TavilyRequestError({ status, body: null, message });
-    const before = io.stderr().length;
-    expect(exitCode(() => handleApiError(e, false))).toBe(3);
-    expect(visible(io.stderr().slice(before))).toBe(`  > Error: ${message}\n`);
-  }
-  const e = new TavilyRequestError({ status: 401, body: null, message });
-  expect(exitCode(() => handleApiError(e, true))).toBe(3);
-  expect(JSON.parse(io.stdout())).toEqual({ error: message });
-});
-
 test("keylessCapError maps SDK fields, including window, in the Python key order", () => {
   const payload = keylessCapError(capError());
   expect(Object.keys(payload)).toEqual([
@@ -103,21 +58,6 @@ test("keylessCapError maps SDK fields, including window, in the Python key order
     retry_after_seconds: 3600,
     next_actions: [{ type: "signup", url: "https://tavily.com/signup" }],
   });
-});
-
-test("a keyless cap hit in runWithApiErrors exits 3 in JSON and human modes", async () => {
-  const hit = (json: boolean) =>
-    runWithApiErrors(json, async () => {
-      throw capError();
-    }).catch((e: ExitError) => e.code);
-  expect(await hit(true)).toBe(3);
-  expect(JSON.parse(io.stdout())).toEqual({ error: keylessCapError(capError()) });
-  expect(await hit(false)).toBe(3);
-  const text = visible(io.stderr());
-  expect(text).toContain("  > Tavily rate limit reached.");
-  expect(text).toContain("    Retry after: 1h (3600s)");
-  expect(text).toContain("      - Sign up for a Tavily API key:  https://tavily.com/signup");
-  expect(text).toContain("  Run tvly login to authenticate and remove this cap.");
 });
 
 test("handleOauthRefreshError", () => {

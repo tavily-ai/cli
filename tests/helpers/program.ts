@@ -4,19 +4,9 @@ import type { TavilyClientLike } from "../../src/core/tavily-client.js";
 import { ExitError } from "../../src/errors.js";
 import { buildProgram } from "../../src/program.js";
 
-/** What `runProgram` feeds the commands: the client both factories return, and stdin text. */
-const fake = vi.hoisted(() => ({ client: undefined as unknown as TavilyClientLike, stdin: "" }));
+/** What `runProgram` feeds the commands through the `node:fs` mock: stdin text. */
+const fake = vi.hoisted(() => ({ stdin: "" }));
 
-type Factory = typeof import("../../src/core/client-factory.js");
-
-/** Both factories resolve to the client passed to `runProgram`; tests override them per call. */
-const factory = vi.hoisted(() => ({
-  getKeyedClient: vi.fn<Factory["getKeyedClient"]>(async () => fake.client),
-  getClientOrKeyless: vi.fn<Factory["getClientOrKeyless"]>(async () => fake.client),
-}));
-export const clientFactory = factory;
-
-vi.mock("../../src/core/client-factory.js", () => factory);
 vi.mock("node:fs", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs")>();
   const readFileSync = ((file: unknown, ...rest: unknown[]) =>
@@ -46,7 +36,9 @@ export function stubClient(methods: Partial<TavilyClientLike>): TavilyClientLike
 type Action = (...args: any[]) => void | Promise<void>;
 
 /**
- * Run the real command tree in-process with `client`, returning the exit code `cli.ts` would set.
+ * Run the real command tree in-process with `client` as every resolved client, returning the exit
+ * code `cli.ts` would set. The commands resolve the credential for real, so a key is set unless
+ * the test chose one (`vi.stubEnv("TAVILY_API_KEY", "")` for the keyless and no-key cases).
  * `actions` replaces command actions by name (`"init"`, or `"setup mcp"` for a subcommand), for
  * commands that take injected deps.
  */
@@ -55,13 +47,14 @@ export async function runProgram(
   client: TavilyClientLike = stubClient({}),
   opts: { stdin?: string; actions?: Record<string, Action> } = {},
 ): Promise<number> {
-  fake.client = client;
   fake.stdin = opts.stdin ?? "";
-  const program = buildProgram();
+  const key = process.env.TAVILY_API_KEY;
+  if (key === undefined) process.env.TAVILY_API_KEY = "tvly-test";
+  const program = buildProgram({ resolveClient: async () => client });
   for (const sub of program.commands) {
     for (const cmd of [sub, ...sub.commands]) {
-      const key = cmd === sub ? sub.name() : `${sub.name()} ${cmd.name()}`;
-      const action = opts.actions?.[key];
+      const name = cmd === sub ? sub.name() : `${sub.name()} ${cmd.name()}`;
+      const action = opts.actions?.[name];
       if (action) cmd.action(action);
     }
   }
@@ -72,5 +65,7 @@ export async function runProgram(
     if (e instanceof ExitError) return e.code;
     if (e instanceof CommanderError) return e.exitCode === 0 ? 0 : 2;
     throw e;
+  } finally {
+    if (key === undefined) delete process.env.TAVILY_API_KEY;
   }
 }

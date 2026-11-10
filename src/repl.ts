@@ -1,6 +1,6 @@
 import { createInterface } from "node:readline/promises";
 import { type Command, CommanderError } from "commander";
-import { getApiKeyOrExit } from "./commands/common.js";
+import { getApiKeyOrExit } from "./commands/credential.js";
 import { authSource } from "./core/config.js";
 import { ExitError, messageOf } from "./errors.js";
 import { buildProgram } from "./program.js";

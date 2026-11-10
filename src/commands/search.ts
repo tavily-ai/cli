@@ -1,16 +1,16 @@
 /** tvly search — web search via the Tavily API; up to 5 queries run in parallel. */
 import { TavilyKeylessLimitError, TavilyRequestError } from "@tavily/core";
 import { type Command, Option } from "commander";
-import { getClientOrKeyless } from "../core/client-factory.js";
+import type { Context } from "../context.js";
 import { applySearchFlags, searchBodyFromOptions } from "../core/search-flags.js";
 import type { Json } from "../core/tavily-client.js";
 import { ExitError, messageOf } from "../errors.js";
 import { keylessCapError, printKeylessCapHit } from "../ui/keyless.js";
 import { resolveOutput } from "../ui/render/emit.js";
 import { printMultiSearchResults, printSearchResults } from "../ui/render/search.js";
-import { withSpinner } from "../ui/spinner.js";
+import { invoke, LIMIT_STATUSES } from "./invoke.js";
 import { addCommonOptions, parseNumberArg, resolveJson } from "./options.js";
-import { LIMIT_STATUSES, QUERY_REQUIRED, readQueryArg, runWithApiErrors } from "./shared.js";
+import { QUERY_REQUIRED, readQueryArg } from "./shared.js";
 
 const MAX_QUERIES = 5;
 const DEFAULT_CHARS = 600;
@@ -43,7 +43,12 @@ function readQueries(args: string[], cmd: Command): string[] {
   return queries;
 }
 
-export async function run(args: string[], opts: SearchOptions, cmd: Command): Promise<void> {
+export async function run(
+  args: string[],
+  opts: SearchOptions,
+  cmd: Command,
+  ctx: Context,
+): Promise<void> {
   const json = resolveJson(cmd);
   const queries = readQueries(args, cmd);
   const outputFile = resolveOutput(opts.output, "search", queries[0]);
@@ -51,21 +56,18 @@ export async function run(args: string[], opts: SearchOptions, cmd: Command): Pr
   const maxChars = opts.maxChars ?? Math.floor(DEFAULT_CHARS / queries.length);
   const body = searchBodyFromOptions(opts);
 
+  const call = { label: "Searching...", keyed: false as const, clientName: opts.clientName };
   if (queries.length === 1) {
-    const response = await runWithApiErrors(json, async () => {
-      const client = await getClientOrKeyless(opts.clientName);
-      return withSpinner("Searching...", !json, () =>
-        client.search({ query: queries[0], ...body }),
-      );
-    });
+    const response = await invoke(cmd, ctx, call, (client) =>
+      client.search({ query: queries[0], ...body }),
+    );
     await printSearchResults(response, { json, outputFile, maxChars });
     return;
   }
 
-  const client = await runWithApiErrors(json, () => getClientOrKeyless(opts.clientName));
   const capHits: TavilyKeylessLimitError[] = [];
   let limitHit = false;
-  const responses = await withSpinner("Searching...", !json, () =>
+  const responses = await invoke(cmd, ctx, call, (client) =>
     Promise.all(
       queries.map(async (query): Promise<Json> => {
         try {

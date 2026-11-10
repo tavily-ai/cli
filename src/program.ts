@@ -10,6 +10,7 @@ import {
 } from "./commands/options.js";
 import type { PollOptions, RunOptions } from "./commands/research.js";
 import type { McpOptions } from "./commands/setup.js";
+import { type Context, defaultContext } from "./context.js";
 import { AGENT_NAMES } from "./core/agent-names.js";
 import { out } from "./ui/theme.js";
 import { VERSION } from "./version.js";
@@ -38,7 +39,7 @@ function addExtractOptions(cmd: Command): Command {
     .addOption(new Option("--format <format>", "Output format.").choices(["markdown", "text"]));
 }
 
-export function buildProgram(): Command {
+export function buildProgram(ctx: Context = defaultContext): Command {
   const program = new Command("tvly")
     .description("Tavily CLI — search, extract, crawl, map, and research from the command line.")
     .addHelpText("after", HELP_AFTER)
@@ -79,7 +80,7 @@ export function buildProgram(): Command {
     .option("--browser", "Open OAuth in a browser.")
     .option("--no-browser", "Print the OAuth URL and wait for its local callback.")
     .action(async (opts: InitOptions, cmd: Command) => {
-      await (await import("./commands/init.js")).run(opts, cmd);
+      await (await import("./commands/init.js")).run(opts, cmd, ctx);
     });
   const authModule = () => import("./commands/auth.js");
   program
@@ -112,7 +113,7 @@ export function buildProgram(): Command {
     )
     .addHelpText("after", KEYLESS_HELP)
     .action(async (queries: string[], opts: Record<string, unknown>, cmd: Command) => {
-      await (await searchModule()).run(queries, opts, cmd);
+      await (await searchModule()).run(queries, opts, cmd, ctx);
     });
   // search's flags come from the SDK catalog; they are added only when search is dispatched.
   let searchConfigured = false;
@@ -134,7 +135,7 @@ export function buildProgram(): Command {
     .option("--timeout <seconds>", "Max wait time in seconds (1-60).", seconds)
     .addHelpText("after", KEYLESS_HELP)
     .action(async (urls: string[], opts: Record<string, unknown>, cmd: Command) => {
-      await (await import("./commands/extract.js")).run(urls, opts, cmd);
+      await (await import("./commands/extract.js")).run(urls, opts, cmd, ctx);
     });
   addCommonOptions(extract);
   const addSiteOptions = (cmd: Command, verb: string, limitHelp: string) => {
@@ -178,7 +179,7 @@ export function buildProgram(): Command {
     .option("--output-dir <dir>", "Save each page as a .md file in this directory.")
     .addHelpText("after", needsKey)
     .action(async (url: string, opts: Record<string, unknown>, cmd: Command) => {
-      await (await import("./commands/site.js")).runCrawl(url, opts, cmd);
+      await (await import("./commands/site.js")).runCrawl(url, opts, cmd, ctx);
     });
   addCommonOptions(crawl);
 
@@ -191,7 +192,7 @@ export function buildProgram(): Command {
   map
     .addHelpText("after", needsKey)
     .action(async (url: string, opts: Record<string, unknown>, cmd: Command) => {
-      await (await import("./commands/site.js")).runMap(url, opts, cmd);
+      await (await import("./commands/site.js")).runMap(url, opts, cmd, ctx);
     });
   addCommonOptions(map);
 
@@ -235,7 +236,7 @@ export function buildProgram(): Command {
   researchRun
     .addHelpText("after", `\nYou can also run directly: tvly research "your query"\n${needsKey}`)
     .action(async (query: string | undefined, opts: RunOptions, cmd: Command) => {
-      await (await research()).run(query, opts, cmd);
+      await (await research()).run(query, opts, cmd, ctx);
     });
 
   const researchStatus = group
@@ -243,7 +244,7 @@ export function buildProgram(): Command {
     .description("Check the status of a research task.")
     .argument("<request_id>", "The research request ID.")
     .action(async (requestId: string, opts: Record<string, unknown>, cmd: Command) => {
-      await (await research()).status(requestId, opts, cmd);
+      await (await research()).status(requestId, opts, cmd, ctx);
     });
   addClientNameOption(researchStatus);
 
@@ -252,7 +253,7 @@ export function buildProgram(): Command {
     .description("Poll a research task until completion and return results.")
     .argument("<request_id>", "The research request ID.")
     .action(async (requestId: string, opts: PollOptions, cmd: Command) => {
-      await (await research()).poll(requestId, opts, cmd);
+      await (await research()).poll(requestId, opts, cmd, ctx);
     });
   addWaitOptions(researchPoll);
   addCommonOptions(researchPoll);

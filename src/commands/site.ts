@@ -1,12 +1,12 @@
 /** tvly crawl and tvly map — walk a website via the Tavily API (both need an API key). */
 import type { Command } from "commander";
-import { getKeyedClient } from "../core/client-factory.js";
+import type { Context } from "../context.js";
 import { printCrawlResults, printMapResults } from "../ui/render/crawl.js";
 import { resolveOutput } from "../ui/render/emit.js";
-import { withSpinner } from "../ui/spinner.js";
 import { hostOf } from "../ui/text.js";
+import { invoke } from "./invoke.js";
 import { resolveJson } from "./options.js";
-import { definedSnake, runWithApiErrors, splitCsv } from "./shared.js";
+import { definedSnake, splitCsv } from "./shared.js";
 
 /** The options crawl and map share. */
 interface SiteOptions {
@@ -53,26 +53,40 @@ function siteBody(url: string, opts: SiteOptions): Record<string, unknown> {
   return { ...body, ...definedSnake(opts, ["timeout"]) };
 }
 
-export async function runCrawl(url: string, opts: CrawlOptions, cmd: Command): Promise<void> {
+export async function runCrawl(
+  url: string,
+  opts: CrawlOptions,
+  cmd: Command,
+  ctx: Context,
+): Promise<void> {
   const json = resolveJson(cmd);
   const outputFile = resolveOutput(opts.output, "crawl", hostOf(url));
-  const client = await getKeyedClient("crawl", { json, clientName: opts.clientName });
   const body = {
     ...siteBody(url, opts),
     ...definedSnake(opts, ["chunksPerSource", "extractDepth", "format", "includeImages"]),
   };
-  const response = await runWithApiErrors(json, () =>
-    withSpinner(`Crawling ${url}...`, !json, () => client.crawl(body)),
+  const response = await invoke(
+    cmd,
+    ctx,
+    { label: `Crawling ${url}...`, keyed: "crawl", clientName: opts.clientName },
+    (client) => client.crawl(body),
   );
   await printCrawlResults(response, { json, outputFile, outputDir: opts.outputDir });
 }
 
-export async function runMap(url: string, opts: SiteOptions, cmd: Command): Promise<void> {
+export async function runMap(
+  url: string,
+  opts: SiteOptions,
+  cmd: Command,
+  ctx: Context,
+): Promise<void> {
   const json = resolveJson(cmd);
   const outputFile = resolveOutput(opts.output, "map", hostOf(url));
-  const client = await getKeyedClient("map", { json, clientName: opts.clientName });
-  const response = await runWithApiErrors(json, () =>
-    withSpinner(`Mapping ${url}...`, !json, () => client.map(siteBody(url, opts))),
+  const response = await invoke(
+    cmd,
+    ctx,
+    { label: `Mapping ${url}...`, keyed: "map", clientName: opts.clientName },
+    (client) => client.map(siteBody(url, opts)),
   );
   await printMapResults(response, { json, outputFile });
 }
