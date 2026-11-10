@@ -14,11 +14,8 @@ export default defineConfig({
           include: ["tests/**/*.test.ts"],
           exclude: [
             "tests/startup.test.ts",
-            // install.sh is a POSIX script tested under script(1) ptys; the contract tests use
-            // /tmp, a ":" PATH separator, and #!/bin/sh stubs.
-            ...(process.platform === "win32"
-              ? ["tests/install-sh.test.ts", "tests/contract.test.ts"]
-              : []),
+            // install.sh is a POSIX script tested under script(1) ptys.
+            ...(process.platform === "win32" ? ["tests/install-sh.test.ts"] : []),
           ],
         },
       },

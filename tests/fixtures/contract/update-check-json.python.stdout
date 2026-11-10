@@ -1,1 +1,0 @@
-{"blocked_reason": "This CLI is running in a uvx cache environment and cannot update itself in place. Exit and rerun uvx with the desired Tavily CLI version instead.", "can_update": false, "current_version": "0.2.1", "install_method": "uvx", "latest_version": "0.2.1", "ok": true, "update_available": false, "updated": false}
