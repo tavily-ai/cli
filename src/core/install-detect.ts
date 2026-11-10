@@ -6,7 +6,6 @@ import type { Exec } from "../util/exec.js";
 import { compareVersions } from "../util/semver.js";
 
 const NPM_LATEST_URL = "https://registry.npmjs.org/@tavily/cli/latest";
-const PACKAGE_SPEC = "@tavily/cli@latest";
 
 export type InstallMethod = "npm" | "pnpm" | "yarn" | "bun" | "npx" | "source" | "unknown";
 
@@ -18,12 +17,17 @@ export interface InstallInfo {
 
 export type GlobalManager = "npm" | "pnpm" | "yarn" | "bun";
 
-export const MANAGER_COMMANDS: Record<GlobalManager, string[]> = {
-  npm: ["npm", "install", "-g", PACKAGE_SPEC],
-  pnpm: ["pnpm", "add", "-g", PACKAGE_SPEC],
-  yarn: ["yarn", "global", "add", PACKAGE_SPEC],
-  bun: ["bun", "add", "-g", PACKAGE_SPEC],
-};
+/** The global install command; `TAVILY_CLI_PACKAGE` points it at a tarball or tag before a release. */
+export function managerCommand(manager: GlobalManager, env: NodeJS.ProcessEnv): string[] {
+  const spec = env.TAVILY_CLI_PACKAGE || "@tavily/cli@latest";
+  const commands: Record<GlobalManager, string[]> = {
+    npm: ["npm", "install", "-g", spec],
+    pnpm: ["pnpm", "add", "-g", spec],
+    yarn: ["yarn", "global", "add", spec],
+    bun: ["bun", "add", "-g", spec],
+  };
+  return commands[manager];
+}
 
 /** How to run the CLI without a global install, per package manager. */
 export const MANAGER_RUNNERS: Record<GlobalManager, string> = {
@@ -172,7 +176,7 @@ export function detectInstall(
     );
   }
   // The resolved path, not the bare name: see npmRootGlobalDefault.
-  const [, ...args] = MANAGER_COMMANDS[method as GlobalManager];
+  const [, ...args] = managerCommand(method as GlobalManager, env);
   return { method, command: [manager, ...args], blockedReason: null };
 }
 

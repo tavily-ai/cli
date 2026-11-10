@@ -7,8 +7,8 @@ import {
   detectPackageManager,
   type GlobalManager,
   globalBinDir,
-  MANAGER_COMMANDS,
   MANAGER_RUNNERS,
+  managerCommand,
 } from "../core/install-detect.js";
 import { installMcp, MCP_AUTH_NOTE, type McpSetupResult } from "../core/mcp-setup.js";
 import { looksHeadless, runBrowserLogin } from "../core/oauth.js";
@@ -139,12 +139,13 @@ async function installStep(opts: InitOptions, json: boolean, host: Host): Promis
 
   const manager = detectPackageManager(host);
   step.install.manager = manager;
-  const [name, ...args] = MANAGER_COMMANDS[manager];
+  const command = managerCommand(manager, host.env);
+  const [name, ...args] = command;
   const bin = host.exec.which(name as string);
   // The install streams to the terminal; a --json run keeps stdout for the result.
   if (!bin || !host.exec.run(bin, args, { inherit: json ? "stderr" : true }).ok) {
     err(`Failed to install @tavily/cli globally using ${manager}.`);
-    err(`Retry: ${MANAGER_COMMANDS[manager].join(" ")}`);
+    err(`Retry: ${command.join(" ")}`);
     err(`You can run without a global install: ${MANAGER_RUNNERS[manager]} <command>`);
     step.failed = true;
     return step;

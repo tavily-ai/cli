@@ -316,6 +316,13 @@ describe("init global install", () => {
     expect(io.stdout()).toContain("tvly installed globally (npm)");
   });
 
+  test("TAVILY_CLI_PACKAGE replaces the package spec in the install command", async () => {
+    const { host, exec } = setup({ tvly: false });
+    host.env.TAVILY_CLI_PACKAGE = "/tmp/tavily-cli-0.3.0.tgz";
+    expect(await runInit(["--skip-skills"], host)).toBe(0);
+    expect(exec.calls[0]?.args).toEqual(["install", "-g", "/tmp/tavily-cli-0.3.0.tgz"]);
+  });
+
   test("declining the install continues and then fails the cli check", async () => {
     const { host, exec } = setup({ tvly: false, answer: false });
     expect(await runInit(["--skip-skills"], host)).toBe(1);

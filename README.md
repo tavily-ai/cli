@@ -633,6 +633,7 @@ tvly set-default --claude --project
 | `TAVILY_ORG_ID` | Organization ID attached to requests |
 | `TAVILY_HTTP_PROXY` / `TAVILY_HTTPS_PROXY` | Proxy URLs used for HTTP and HTTPS requests |
 | `NO_UPDATE_NOTIFIER` | Disable the once-a-day update notice (`CI` disables it too) |
+| `TAVILY_CLI_PACKAGE` | Package spec `tvly init` installs globally instead of `@tavily/cli@latest` (a tarball path or tag, for testing before a release) |
 
 `TAVILY_HTTP_PROXY` and `TAVILY_HTTPS_PROXY` apply to API calls made with an
 API key. Browser login, OAuth-credentialed commands, and `tvly update` use
