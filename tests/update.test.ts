@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test, vi } from "vitest";
@@ -17,8 +17,11 @@ import { fakeHost, runProgram } from "./helpers/program.js";
 const io = captureOutput();
 
 const found = (name: string) => `/usr/bin/${name}`;
-const NPM_ROOT = "/opt/u/lib/node_modules";
-const NPM_ENTRY = `${NPM_ROOT}/@tavily/cli/dist/cli.js`;
+// A directory that existed and is gone, so nothing under it resolves on any machine.
+const ABSENT = mkdtempSync(join(tmpdir(), "tvly-absent-"));
+rmSync(ABSENT, { recursive: true });
+const NPM_ROOT = join(ABSENT, "lib", "node_modules");
+const NPM_ENTRY = join(NPM_ROOT, "@tavily", "cli", "dist", "cli.js");
 const SOURCE_ENTRY = "/work/tavily-cli/dist/cli.js";
 const SOURCE_REASON =
   "This is a source or direct-URL installation. Update it from its original source.";
