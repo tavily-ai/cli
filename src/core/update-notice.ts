@@ -98,7 +98,10 @@ export function startUpdateCheck(deps: UpdateNoticeDeps = {}): () => Promise<voi
       return async () => notify(state.latest);
     }
 
-    const pending = fetchLatestVersion(deps.fetchImpl).catch(() => null);
+    // The race is the only timeout: whatever is still in flight at finish is aborted, so a slow
+    // registry never keeps the process alive after the command's output.
+    const controller = new AbortController();
+    const pending = fetchLatestVersion(deps.fetchImpl, controller.signal).catch(() => null);
     return async () => {
       let timer: NodeJS.Timeout | undefined;
       const latest = await Promise.race([
@@ -108,6 +111,7 @@ export function startUpdateCheck(deps: UpdateNoticeDeps = {}): () => Promise<voi
         }),
       ]);
       clearTimeout(timer);
+      controller.abort();
       writeState(file, { checked_at: now(), latest });
       notify(latest);
     };

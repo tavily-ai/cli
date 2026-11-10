@@ -83,6 +83,19 @@ test("a fetch slower than the race is silent and does not block the exit", async
   expect(io.stderr()).toBe("");
 });
 
+test("a fetch still pending at finish is aborted", async () => {
+  vi.useFakeTimers();
+  let signal: AbortSignal | undefined;
+  const hang = ((_url: string, init: RequestInit) => {
+    signal = init.signal as AbortSignal;
+    return new Promise(() => {});
+  }) as unknown as typeof fetch;
+  const finish = startUpdateCheck(setup({ fetchImpl: hang }).deps)();
+  await vi.advanceTimersByTimeAsync(1500);
+  await finish;
+  expect(signal?.aborted).toBe(true);
+});
+
 test.each<[string, Partial<UpdateNoticeDeps>]>([
   ["CI", { env: { CI: "1" } }],
   ["NO_UPDATE_NOTIFIER", { env: { NO_UPDATE_NOTIFIER: "1" } }],
