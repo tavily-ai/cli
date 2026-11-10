@@ -1,1 +1,0 @@
-{"request_id": "res-123", "created_at": "2026-11-02T10:00:00Z", "status": "completed", "content": "# Rust 2024\n\nThe 2024 edition shipped in February 2025 [1].", "sources": [{"title": "Announcing Rust 1.85", "url": "https://blog.rust-lang.org/2025/02/20/Rust-1.85.0.html", "favicon": null}], "response_time": 12.34}

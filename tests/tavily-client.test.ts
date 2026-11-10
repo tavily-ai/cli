@@ -66,10 +66,10 @@ test("search timeout is capped at 120 and defaults to 60", async () => {
   expect(calls[1]?.opts).toEqual({ timeoutSeconds: 60 });
 });
 
-test("getResearch and researchStream", async () => {
+test("getResearch (with the id encoded) and researchStream", async () => {
   const { c, calls } = client("k");
-  await c.getResearch("abc");
-  expect(calls[0]).toMatchObject({ method: "get", endpoint: "research/abc" });
+  await c.getResearch("a/b?c");
+  expect(calls[0]).toMatchObject({ method: "get", endpoint: "research/a%2Fb%3Fc" });
   expect(calls[0]?.opts).toEqual({ timeoutSeconds: 60 });
   const it = await c.researchStream({ input: "i" });
   expect(calls[1]).toMatchObject({
@@ -91,10 +91,4 @@ test("sseDataLines reassembles split chunks", async () => {
   const out: string[] = [];
   for await (const l of sseDataLines(chunks())) out.push(l);
   expect(out).toEqual(['{"a":1}', '{"b":2}', "[DONE]"]);
-});
-
-test("getResearch encodes the request id", async () => {
-  const { c, calls } = client("k");
-  await c.getResearch("a/b?c");
-  expect(calls[0]?.endpoint).toBe("research/a%2Fb%3Fc");
 });

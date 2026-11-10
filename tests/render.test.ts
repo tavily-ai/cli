@@ -206,11 +206,8 @@ describe("text helpers", () => {
     expect(sanitizeControl(42)).toBe("42");
   });
 
-  test("plain collapses whitespace-only blank lines", () => {
+  test("plain collapses whitespace-only blank lines and keeps the next line's indentation", () => {
     expect(plain("a\n \n\t\n\nb")).toBe("a\n\nb");
-  });
-
-  test("plain keeps the indentation of the line after a blank run", () => {
     expect(plain("a\n\n\n  b")).toBe("a\n\n  b");
     expect(plain("a\n  \n\t\n    b")).toBe("a\n\n    b");
   });

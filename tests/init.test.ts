@@ -35,7 +35,7 @@ describe("init", () => {
     });
     expect(code).toBe(0);
     expect(installSkills).not.toHaveBeenCalled();
-    expect(stdoutJson().skills.skipped).toBe(true);
+    expect(stdoutJson().skills).toMatchObject({ agents: [], skipped: true });
   });
 
   test("--json reuses environment auth", async () => {
@@ -112,20 +112,6 @@ describe("init", () => {
     });
     expect(code).toBe(4);
     expect(stdoutJson().error.stage).toBe("live_search");
-  });
-
-  test("never installs skills for an empty agent list", async () => {
-    const installSkills = vi.fn();
-    const code = await runInit(["--all", "--json"], {
-      home,
-      env: { TAVILY_API_KEY: "tvly-test" },
-      installSkills,
-      which: () => "/usr/bin/tvly",
-      client: okClient,
-    });
-    expect(code).toBe(0);
-    expect(installSkills).not.toHaveBeenCalled();
-    expect(stdoutJson().skills).toMatchObject({ agents: [], skipped: true });
   });
 
   test("--all with --agent is a usage error", async () => {

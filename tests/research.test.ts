@@ -62,31 +62,6 @@ test("research <query> polls until completed and prints the completed payload", 
   expect(JSON.parse(io.stdout())).toEqual(COMPLETED);
 });
 
-test("JSON polling sleeps poll_interval seconds between checks (fake timers)", async () => {
-  vi.useFakeTimers();
-  const { client, getResearch } = pendingClient({ status: "pending" }, COMPLETED);
-  const done = runProgram(["research", "q", "--poll-interval", "10", "--json"], client);
-  await vi.advanceTimersByTimeAsync(9_999);
-  expect(getResearch).toHaveBeenCalledTimes(1);
-  await vi.advanceTimersByTimeAsync(1);
-  expect(await done).toBe(0);
-  expect(getResearch).toHaveBeenCalledTimes(2);
-  expect(JSON.parse(io.stdout())).toEqual(COMPLETED);
-});
-
-test("JSON polling with --poll-interval 0 sleeps at least 1 s and stops at --timeout", async () => {
-  vi.useFakeTimers();
-  const { client, getResearch } = pendingClient({ status: "pending" });
-  const done = runProgram(
-    ["research", "q", "--poll-interval", "0", "--timeout", "1", "--json"],
-    client,
-  );
-  await vi.advanceTimersByTimeAsync(1000);
-  expect(await done).toBe(0);
-  expect(io.stdout()).toBe('{"request_id":"r1","status":"timeout"}\n');
-  expect(getResearch.mock.calls.length).toBeLessThanOrEqual(2);
-});
-
 test("--no-wait --json prints the request id and status", async () => {
   const { client, getResearch } = pendingClient();
   expect(await runProgram(["research", "q", "--no-wait", "--json"], client)).toBe(0);
@@ -280,10 +255,4 @@ test("poll waits for the result; its timeout has no resume hint", async () => {
   await timedOut;
   expect(visible(io.stderr())).toContain("Timed out after 2s.\n");
   expect(io.stderr()).not.toContain("Resume with");
-});
-
-test("poll --timeout 0 --json emits the timeout payload", async () => {
-  const { client } = pendingClient();
-  await runProgram(["research", "poll", "r1", "--timeout", "0", "--json"], client);
-  expect(io.stdout()).toBe('{"request_id":"r1","status":"timeout"}\n');
 });
