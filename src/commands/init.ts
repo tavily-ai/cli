@@ -1,17 +1,8 @@
 /** tvly init — install tvly globally, authenticate, install Tavily skills and workflows, and verify. */
-import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
 import type { Command } from "commander";
-import type { Context } from "../context.js";
-import {
-  authMethod,
-  type ConfigOptions,
-  getApiKey,
-  saveApiKey,
-  saveOauthSession,
-} from "../core/config.js";
+import { authMethod, getApiKey, saveApiKey, saveOauthSession } from "../core/config.js";
 import {
   detectPackageManager,
   type GlobalManager,
@@ -21,31 +12,14 @@ import {
 } from "../core/install-detect.js";
 import { installMcp, MCP_AUTH_NOTE, type McpSetupResult } from "../core/mcp-setup.js";
 import { looksHeadless, runBrowserLogin } from "../core/oauth.js";
-import {
-  detectAgents,
-  installAgentSkills,
-  SKILLS_REPO,
-  type SkillsInstallResult,
-  WORKFLOWS_REPO,
-} from "../core/skills.js";
+import { detectAgents, installAgentSkills, SKILLS_REPO, WORKFLOWS_REPO } from "../core/skills.js";
 import { ExitError, messageOf } from "../errors.js";
+import type { Host } from "../host.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
-import { whichOnPath } from "../util/process.js";
 import { VERSION } from "../version.js";
-import { promptConfirm, resolveJson } from "./options.js";
-
-export interface InitDeps extends ConfigOptions {
-  login?: typeof runBrowserLogin;
-  openImpl?: (url: string) => void;
-  installSkills?: (repo: string, agents: string[]) => Promise<SkillsInstallResult>;
-  installMcp?: typeof installMcp;
-  which?: (name: string) => string | null;
-  stdinIsTTY?: boolean;
-  confirm?: (question: string, defaultYes?: boolean) => Promise<boolean>;
-  spawnImpl?: typeof spawnSync;
-  platform?: NodeJS.Platform;
-}
+import type { LoginHooks } from "./auth.js";
+import { resolveJson } from "./options.js";
 
 export interface InitOptions {
   agent?: string[];
@@ -75,8 +49,8 @@ interface InitResult {
 export async function run(
   opts: InitOptions,
   cmd: Command,
-  ctx: Context,
-  deps: InitDeps = {},
+  host: Host,
+  hooks: LoginHooks = {},
 ): Promise<void> {
   const json = resolveJson(cmd);
   const requested = [...new Set((opts.agent ?? []).map((name) => name.toLowerCase()))];
@@ -85,16 +59,15 @@ export async function run(
     cmd.error("error: Use either --skip-auth or --api-key, not both.");
   }
 
-  const which = deps.which ?? defaultWhich(deps.env ?? process.env);
-  const step = await installStep(opts, json, which, deps);
+  const step = await installStep(opts, json, host);
 
-  const { agents, skills, workflows, mcp } = await selectAgents(requested, opts, json, deps);
+  const { agents, skills, workflows, mcp } = await selectAgents(requested, opts, json, host);
   const result = emptyResult(skills ? agents : [], workflows ? agents : []);
   result.install = step.install;
   let mcpSetup: McpSetupResult | null = null;
 
   try {
-    const auth = await ensureAuth(opts, deps);
+    const auth = await ensureAuth(opts, host, hooks);
     result.auth = auth;
     result.mode = auth.authenticated ? "authenticated" : "keyless";
     result.verification.auth = auth.authenticated;
@@ -102,19 +75,19 @@ export async function run(
     return fail(result, "auth", messageOf(e), 3, json);
   }
 
-  const install = deps.installSkills ?? ((repo, names) => installAgentSkills(repo, names, deps));
   for (const stage of ["skills", "workflows"] as const) {
     const part = result[stage];
     if (part.skipped) continue;
     try {
-      part.restart_required = (await install(part.source, part.agents)).restartRequired;
+      const installed = await installAgentSkills(part.source, part.agents, host);
+      part.restart_required = installed.restartRequired;
     } catch (e) {
       return fail(result, stage, messageOf(e), 1, json);
     }
   }
   if (mcp) {
     try {
-      mcpSetup = await (deps.installMcp ?? installMcp)(agents, { keyless: false, ...deps });
+      mcpSetup = await installMcp(agents, false, host);
       result.mcp = { agents: mcpSetup.configured, skipped: mcpSetup.configured.length === 0 };
     } catch (e) {
       return fail(result, "mcp", messageOf(e), 1, json);
@@ -127,7 +100,7 @@ export async function run(
   }
 
   try {
-    result.verification.live_search = await verifyLiveSearch(ctx, deps);
+    result.verification.live_search = await verifyLiveSearch(host);
   } catch (e) {
     return fail(result, "live_search", messageOf(e), 4, json);
   }
@@ -145,15 +118,6 @@ export async function run(
 const INSTALL_INCOMPLETE =
   "Setup incomplete: global CLI installation failed. Other completed steps are preserved.";
 
-/** `which` over the user's PATH, without the npx cache entry npx prepends for this run. */
-function defaultWhich(env: NodeJS.ProcessEnv): (name: string) => string | null {
-  const PATH = (env.PATH ?? "")
-    .split(path.delimiter)
-    .filter((dir) => !dir.replace(/\\/g, "/").includes("/_npx/"))
-    .join(path.delimiter);
-  return (name) => whichOnPath(name, { ...env, PATH });
-}
-
 interface InstallStep {
   install: InitResult["install"];
   failed: boolean;
@@ -161,13 +125,8 @@ interface InstallStep {
 }
 
 /** Step 1 (Firecrawl's flow): install tvly globally unless it already resolves on PATH. */
-async function installStep(
-  opts: InitOptions,
-  json: boolean,
-  which: (name: string) => string | null,
-  deps: InitDeps,
-): Promise<InstallStep> {
-  const onPath = () => which("tvly") !== null;
+async function installStep(opts: InitOptions, json: boolean, host: Host): Promise<InstallStep> {
+  const onPath = () => host.exec.which("tvly") !== null;
   const step: InstallStep = {
     install: { global: false, manager: null, on_path: onPath(), path_updated: false },
     failed: false,
@@ -175,24 +134,15 @@ async function installStep(
   };
   if (opts.skipInstall || step.install.on_path) return step;
 
-  const interactive = !json && !opts.yes && (deps.stdinIsTTY ?? process.stdin.isTTY === true);
-  if (interactive && !(await (deps.confirm ?? promptConfirm)("Install tvly globally?"))) {
-    return step;
-  }
+  const interactive = !json && !opts.yes && host.stdinIsTTY;
+  if (interactive && !(await host.confirm("Install tvly globally?"))) return step;
 
-  const manager = detectPackageManager(deps.env ?? process.env);
-  const platform = deps.platform ?? process.platform;
-  const win = platform === "win32";
+  const manager = detectPackageManager(host);
   step.install.manager = manager;
   const [name, ...args] = MANAGER_COMMANDS[manager];
-  const bin = which(name as string);
-  const r = bin
-    ? (deps.spawnImpl ?? spawnSync)(win ? `"${bin}"` : bin, args, {
-        stdio: json ? ["ignore", 2, 2] : "inherit",
-        shell: win,
-      })
-    : null;
-  if (r?.status !== 0) {
+  const bin = host.exec.which(name as string);
+  // The install streams to the terminal; a --json run keeps stdout for the result.
+  if (!bin || !host.exec.run(bin, args, { inherit: json ? "stderr" : true }).ok) {
     err(`Failed to install @tavily/cli globally using ${manager}.`);
     err(`Retry: ${MANAGER_COMMANDS[manager].join(" ")}`);
     err(`You can run without a global install: ${MANAGER_RUNNERS[manager]} <command>`);
@@ -202,7 +152,7 @@ async function installStep(
   step.install.global = true;
   step.install.on_path = onPath();
   if (!step.install.on_path) {
-    step.pathNote = await fixPath(manager, interactive, which, deps, platform);
+    step.pathNote = await fixPath(manager, interactive, host);
     step.install.path_updated = step.pathNote !== null;
   }
   return step;
@@ -223,26 +173,20 @@ function rcFileForShell(shell: string, platform: NodeJS.Platform): string {
 async function fixPath(
   manager: GlobalManager,
   interactive: boolean,
-  which: (name: string) => string | null,
-  deps: InitDeps,
-  platform: NodeJS.Platform,
+  host: Host,
 ): Promise<string | null> {
-  const bin = globalBinDir(manager, {
-    which,
-    platform,
-    ...(deps.spawnImpl ? { spawnSync: deps.spawnImpl } : {}),
-  });
+  const bin = globalBinDir(manager, host);
   err("");
   err(`tvly was installed but isn't on your PATH yet.`);
-  if (bin && platform === "win32") {
+  if (bin && host.platform === "win32") {
     err("Add this directory to your PATH, then open a new terminal:");
     err(`  ${bin}`);
   } else if (bin) {
-    const rc = rcFileForShell((deps.env ?? process.env).SHELL ?? "", platform);
+    const rc = rcFileForShell(host.env.SHELL ?? "", host.platform);
     const line = rc.includes("fish") ? `fish_add_path ${bin}` : `export PATH="${bin}:$PATH"`;
     const question = `Add ${bin} to PATH in ${rc}?`;
-    if (interactive && (await (deps.confirm ?? promptConfirm)(question))) {
-      const file = path.join(deps.home ?? homedir(), rc.slice(2));
+    if (interactive && (await host.confirm(question))) {
+      const file = path.join(host.home, rc.slice(2));
       if (!existsSync(file) || !readFileSync(file, "utf8").includes(line)) {
         mkdirSync(path.dirname(file), { recursive: true });
         appendFileSync(file, `\n# Added by tvly init\n${line}\n`);
@@ -263,25 +207,24 @@ async function selectAgents(
   requested: string[],
   opts: InitOptions,
   json: boolean,
-  deps: InitDeps,
+  host: Host,
 ): Promise<{ agents: string[]; skills: boolean; workflows: boolean; mcp: boolean }> {
-  const agents: string[] = requested.length ? requested : detectAgents(deps);
+  const agents: string[] = requested.length ? requested : detectAgents(host);
 
-  const isTTY = deps.stdinIsTTY ?? process.stdin.isTTY === true;
-  const interactive = agents.length > 0 && !opts.yes && !json && isTTY;
+  const interactive = agents.length > 0 && !opts.yes && !json && host.stdinIsTTY;
   const ask = interactive && !requested.length && !opts.all;
-  const confirm = deps.confirm ?? promptConfirm;
   const skills =
     !opts.skipSkills &&
-    (!ask || (await confirm(`Install Tavily skills for detected agents (${agents.join(", ")})?`)));
+    (!ask ||
+      (await host.confirm(`Install Tavily skills for detected agents (${agents.join(", ")})?`)));
   const workflows =
     !opts.skipSkills &&
     !opts.skipWorkflows &&
-    (!ask || (await confirm(`Install the Tavily official workflows (${WORKFLOWS_REPO})?`)));
+    (!ask || (await host.confirm(`Install the Tavily official workflows (${WORKFLOWS_REPO})?`)));
   // MCP is opt-in: only an explicit yes at the prompt configures it.
   const mcp =
     interactive &&
-    (await confirm(
+    (await host.confirm(
       `Add the Tavily MCP server to ${agents.join(", ")} (hosted, signs in with OAuth)?`,
       false,
     ));
@@ -290,33 +233,33 @@ async function selectAgents(
 
 async function ensureAuth(
   opts: InitOptions,
-  deps: InitDeps,
+  host: Host,
+  hooks: LoginHooks,
 ): Promise<{ authenticated: boolean; method: string }> {
-  if (opts.apiKey) await saveApiKey(opts.apiKey, deps);
-  const key = await getApiKey(deps);
-  if (key) return { authenticated: true, method: authMethod(key, deps) };
+  if (opts.apiKey) await saveApiKey(opts.apiKey, host);
+  const key = await getApiKey(host);
+  if (key) return { authenticated: true, method: authMethod(key, host) };
   if (opts.skipAuth) return { authenticated: false, method: "none" };
 
-  const isTTY = deps.stdinIsTTY ?? process.stdin.isTTY === true;
-  if (opts.browser === undefined && !isTTY) {
+  if (opts.browser === undefined && !host.stdinIsTTY) {
     throw new Error(
       "No Tavily credential found. Use --api-key, --browser, --no-browser, or --skip-auth in non-interactive runs.",
     );
   }
 
-  const openBrowser = opts.browser ?? !looksHeadless(deps.env);
-  const session = await (deps.login ?? runBrowserLogin)({
+  const openBrowser = opts.browser ?? !looksHeadless(host.env, host.platform);
+  const session = await (hooks.login ?? runBrowserLogin)({
     openBrowser,
     onStatus: (url: string) => err(`Open this URL to authenticate: ${sanitizeControl(url)}`),
-    ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
-    ...(deps.openImpl ? { openImpl: deps.openImpl } : {}),
+    fetchImpl: host.fetch,
+    openImpl: host.openUrl,
   });
-  await saveOauthSession(session, deps);
+  await saveOauthSession(session, host);
   return { authenticated: true, method: "oauth" };
 }
 
-async function verifyLiveSearch(ctx: Context, deps: InitDeps): Promise<boolean> {
-  const client = await ctx.resolveClient(await getApiKey(deps), "tavily-cli-init");
+async function verifyLiveSearch(host: Host): Promise<boolean> {
+  const client = await host.resolveClient(await getApiKey(host), "tavily-cli-init");
   const response = await client.search({ query: "Tavily Search API", max_results: 1 });
   return Array.isArray((response as { results?: unknown } | null)?.results);
 }

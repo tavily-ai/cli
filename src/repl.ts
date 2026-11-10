@@ -3,6 +3,7 @@ import { type Command, CommanderError } from "commander";
 import { getApiKeyOrExit } from "./commands/credential.js";
 import { authSource } from "./core/config.js";
 import { ExitError, messageOf } from "./errors.js";
+import type { Host } from "./host.js";
 import { buildProgram } from "./program.js";
 import { sanitizeControl } from "./ui/text.js";
 import { colorEnabled, colors, LOGO } from "./ui/theme.js";
@@ -13,24 +14,19 @@ interface ReplOptions {
   input?: NodeJS.ReadableStream & { isTTY?: boolean; setRawMode?: (mode: boolean) => unknown };
   output?: NodeJS.WritableStream & { columns?: number };
   program?: () => Command;
-  home?: string;
-  env?: NodeJS.ProcessEnv;
 }
 
 const PROMPT = "\x1b[38;2;92;217;230m❯\x1b[0m  ";
 
-async function printBanner(
-  say: (line?: string) => void,
-  opts: Pick<ReplOptions, "home" | "env">,
-): Promise<void> {
-  const key = await getApiKeyOrExit(false, opts);
+async function printBanner(say: (line?: string) => void, host: Host): Promise<void> {
+  const key = await getApiKeyOrExit(false, host);
 
   say(LOGO);
   say(`  ${colors.dim(`v${VERSION}`)}`);
   say();
 
   if (key) {
-    say(`  ${colors.green(">")} Authenticated via ${authSource(key, opts.env)}`);
+    say(`  ${colors.green(">")} Authenticated via ${authSource(key, host.env)}`);
   } else {
     say(`  ${colors.pink(">")} Not authenticated`);
     say(`    ${colors.dim("search and extract work without a key (with a rate-limit cap).")}`);
@@ -80,10 +76,10 @@ function silenceErrors(cmd: Command): void {
 }
 
 /** Interactive loop: one fresh program per line, errors are reported and never end the session. */
-export async function runRepl(opts: ReplOptions = {}): Promise<void> {
+export async function runRepl(host: Host, opts: ReplOptions = {}): Promise<void> {
   const input = opts.input ?? process.stdin;
   const output = opts.output ?? process.stderr;
-  const makeProgram = opts.program ?? buildProgram;
+  const makeProgram = opts.program ?? (() => buildProgram(host));
   const say = (line = "") => {
     output.write(`${line}\n`);
   };
@@ -94,7 +90,7 @@ export async function runRepl(opts: ReplOptions = {}): Promise<void> {
   };
 
   say();
-  await printBanner(say, opts);
+  await printBanner(say, host);
 
   // Lines are queued so input that arrives while a command runs (or is piped in) is not lost.
   const queue: string[] = [];

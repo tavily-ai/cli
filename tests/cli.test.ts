@@ -2,6 +2,7 @@ import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
+import { fakeHost } from "./helpers/host.js";
 import { runCli } from "./helpers/run-cli.js";
 
 const VERSION = (
@@ -128,7 +129,7 @@ test("an unexpected exception is printed with control bytes stripped", async () 
   });
   try {
     const { main } = await import("../src/cli.js");
-    expect(await main(["node", "tvly"])).toBe(1);
+    expect(await main(fakeHost({ argv: ["node", "tvly"] }))).toBe(1);
   } finally {
     spy.mockRestore();
     vi.doUnmock("../src/program.js");

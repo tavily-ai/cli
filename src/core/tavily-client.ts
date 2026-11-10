@@ -19,6 +19,8 @@ interface TavilyClientOptions {
   humanId?: string;
   clientName?: string;
   apiBaseUrl?: string;
+  projectId?: string;
+  orgId?: string;
   transport?: TavilyTransport;
 }
 
@@ -26,7 +28,6 @@ const DEFAULT_HTTP_TIMEOUT = 60;
 const SEARCH_MAX_TIMEOUT = 120;
 
 export function createTavilyClient(opts: TavilyClientOptions): TavilyClientLike {
-  const { TAVILY_PROJECT, TAVILY_ORG_ID } = process.env;
   const transport =
     opts.transport ??
     createTransport({
@@ -36,8 +37,8 @@ export function createTavilyClient(opts: TavilyClientOptions): TavilyClientLike 
       sessionId: opts.sessionId,
       ...(opts.humanId ? { humanId: opts.humanId } : {}),
       ...(opts.clientName ? { clientName: opts.clientName } : {}),
-      ...(TAVILY_PROJECT ? { projectId: TAVILY_PROJECT } : {}),
-      ...(TAVILY_ORG_ID ? { orgId: TAVILY_ORG_ID } : {}),
+      ...(opts.projectId ? { projectId: opts.projectId } : {}),
+      ...(opts.orgId ? { orgId: opts.orgId } : {}),
     });
 
   /** A numeric `body.timeout` wins over the default and is also the HTTP timeout. */

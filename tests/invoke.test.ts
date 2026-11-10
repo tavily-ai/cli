@@ -3,21 +3,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TavilyRequestError } from "@tavily/core";
 import { Command } from "commander";
-import { afterEach, expect, test, vi } from "vitest";
+import { expect, test, vi } from "vitest";
 import { invoke } from "../src/commands/invoke.js";
 import { configPaths } from "../src/core/config.js";
 import type { ExitError } from "../src/errors.js";
 import { captureOutput, visible } from "./helpers/capture.js";
-import { runProgram, stubClient } from "./helpers/program.js";
+import { clientHost, fakeHost, runProgram, stubClient } from "./helpers/program.js";
 
 const io = captureOutput();
-afterEach(() => {
-  vi.unstubAllEnvs();
-  vi.unstubAllGlobals();
-});
 
 const failing = (e: unknown) =>
-  stubClient({
+  clientHost({
     search: async () => {
       throw e;
     },
@@ -38,28 +34,25 @@ test("other errors print to stderr with control bytes stripped and exit 4", asyn
   expect(io.stdout()).toBe("");
 });
 
-/** An empty HOME, or one holding an expired OAuth session whose refresh fails on the network. */
-function stubHome(expiredSession: boolean): void {
+/** A home holding an expired OAuth session whose refresh fails on the network. */
+function expiredSessionHome(): string {
   const home = mkdtempSync(join(tmpdir(), "tvly-invoke-"));
-  if (expiredSession) {
-    const { dir, file } = configPaths(home);
-    mkdirSync(dir, { recursive: true });
-    const oauth = { access_token: "old", refresh_token: "old", expires_at: 0, client_id: "c" };
-    writeFileSync(file, JSON.stringify({ oauth }));
-  }
-  vi.stubEnv("HOME", home);
-  vi.stubEnv("USERPROFILE", home);
-  vi.stubEnv("TAVILY_API_KEY", "");
-  vi.stubGlobal("fetch", async () => {
-    throw new TypeError("network down");
-  });
+  const { dir, file } = configPaths(home);
+  mkdirSync(dir, { recursive: true });
+  const oauth = { access_token: "old", refresh_token: "old", expires_at: 0, client_id: "c" };
+  writeFileSync(file, JSON.stringify({ oauth }));
+  return home;
 }
+
+const networkDown = async () => {
+  throw new TypeError("network down");
+};
 
 test.each(["search", "crawl"])(
   "%s --json reports a stored-session refresh failure without a keyless fallback",
   async (command) => {
-    stubHome(true);
-    expect(await runProgram([command, "https://a.example", "--json"], stubClient({}))).toBe(3);
+    const host = fakeHost({ home: expiredSessionHome(), fetch: networkDown });
+    expect(await runProgram([command, "https://a.example", "--json"], host)).toBe(3);
     const { error } = JSON.parse(io.stdout());
     expect(error.code).toBe("oauth_refresh_failed");
     expect(error.message).toMatch(/^Could not refresh.*network down$/);
@@ -67,13 +60,13 @@ test.each(["search", "crawl"])(
 );
 
 test("a keyed command without a key prints why and exits 3 before resolving a client", async () => {
-  stubHome(false);
-  const ctx = { resolveClient: vi.fn(async () => stubClient({})) };
-  const code = await invoke(new Command(), ctx, { keyed: "crawl" }, async () => {}).catch(
+  const resolveClient = vi.fn(async () => stubClient({}));
+  const host = fakeHost({ resolveClient });
+  const code = await invoke(new Command(), host, { keyed: "crawl" }, async () => {}).catch(
     (e: ExitError) => e.code,
   );
   expect(code).toBe(3);
-  expect(ctx.resolveClient).not.toHaveBeenCalled();
+  expect(resolveClient).not.toHaveBeenCalled();
   expect(io.stdout()).toBe("");
   expect(visible(io.stderr())).toContain("  > The crawl command requires a Tavily API key.");
 });

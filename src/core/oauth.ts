@@ -2,7 +2,6 @@
  * Native MCP OAuth 2.1 protocol functions (discovery, dynamic registration, PKCE,
  * token exchange/refresh, revocation). Also holds the interactive browser login with its local callback server.
  */
-import { spawn } from "node:child_process";
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -368,10 +367,7 @@ export async function revokeToken(
 }
 
 /** Heuristic: SSH or missing display means don't try to open a browser. */
-export function looksHeadless(
-  env: NodeJS.ProcessEnv = process.env,
-  platform: string = process.platform,
-): boolean {
+export function looksHeadless(env: NodeJS.ProcessEnv, platform: string): boolean {
   if (env.SSH_CONNECTION || env.SSH_TTY) return true;
   return platform === "linux" && !env.DISPLAY && !env.WAYLAND_DISPLAY;
 }
@@ -392,23 +388,6 @@ export function callbackHtml({ success }: { success: boolean }): string {
 </body></html>`;
 }
 
-/** Best-effort browser launch; failures are ignored because the URL was already printed. */
-export function openBrowser(url: string, spawnImpl: typeof spawn = spawn): void {
-  const [cmd, args] =
-    process.platform === "darwin"
-      ? ["open", [url]]
-      : process.platform === "win32"
-        ? ["rundll32", ["url.dll,FileProtocolHandler", url]]
-        : ["xdg-open", [url]];
-  try {
-    const child = spawnImpl(cmd as string, args as string[], { detached: true, stdio: "ignore" });
-    child.on("error", () => {});
-    child.unref();
-  } catch {
-    // ignore
-  }
-}
-
 interface CallbackParams {
   code: string | null;
   state: string | null;
@@ -421,10 +400,10 @@ export async function runBrowserLogin(opts: {
   openBrowser: boolean;
   timeoutSeconds?: number;
   onStatus?: (url: string) => void;
-  fetchImpl?: typeof fetch;
-  openImpl?: (url: string) => void;
+  fetchImpl: typeof fetch;
+  openImpl: (url: string) => void;
 }): Promise<OAuthSession> {
-  const { timeoutSeconds = LOGIN_TIMEOUT_SECONDS, fetchImpl = globalThis.fetch } = opts;
+  const { timeoutSeconds = LOGIN_TIMEOUT_SECONDS, fetchImpl } = opts;
   const metadata = await fetchMetadata(fetchImpl);
 
   let resolveCallback: (p: CallbackParams) => void = () => {};
@@ -475,7 +454,7 @@ export async function runBrowserLogin(opts: {
     const authorizeUrl = buildAuthorizeUrl(metadata, client, { state, codeChallenge: challenge });
 
     opts.onStatus?.(authorizeUrl);
-    if (opts.openBrowser) (opts.openImpl ?? openBrowser)(authorizeUrl);
+    if (opts.openBrowser) opts.openImpl(authorizeUrl);
 
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(

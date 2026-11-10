@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test, vi } from "vitest";
 import { grandparentPid, pidAlive, resolveSessionId } from "../src/core/session.js";
+import { fakeExec } from "./helpers/exec.js";
 
 function tempDir(sessions?: Record<string, string>): string {
   const dir = mkdtempSync(path.join(tmpdir(), "tvly-session-"));
@@ -56,48 +57,46 @@ test("stores only ppid when gppid is null and treats a corrupt file as empty", (
 
 test("grandparentPid parses /proc stat on linux", () => {
   const readFile = vi.fn(() => "1234 (node) S 42 1234 1234 0 -1");
-  expect(grandparentPid(1234, { platform: "linux", readFile })).toBe(42);
+  expect(grandparentPid(1234, { platform: "linux", exec: fakeExec() }, readFile)).toBe(42);
   expect(readFile).toHaveBeenCalledWith("/proc/1234/stat");
 });
 
 test("grandparentPid handles parentheses in the linux command name", () => {
   const readFile = () => "1234 (a) b) S 42 1 1";
-  expect(grandparentPid(1234, { platform: "linux", readFile })).toBe(42);
+  expect(grandparentPid(1234, { platform: "linux", exec: fakeExec() }, readFile)).toBe(42);
 });
 
 test("grandparentPid parses ps output on darwin", () => {
-  const spawnSync = vi.fn(() => ({ status: 0, stdout: "  77\n" }));
-  const got = grandparentPid(9, { platform: "darwin", spawnSync: spawnSync as never });
-  expect(got).toBe(77);
-  expect(spawnSync.mock.calls[0]?.slice(0, 2)).toEqual(["ps", ["-o", "ppid=", "-p", "9"]]);
-});
-
-test("grandparentPid parses PowerShell output on win32", () => {
-  const spawnSync = vi.fn(() => ({ status: 0, stdout: "808\r\n" }));
-  const got = grandparentPid(9, { platform: "win32", spawnSync: spawnSync as never });
-  expect(got).toBe(808);
-  const [cmd, args] = spawnSync.mock.calls[0] as unknown as [string, string[]];
-  expect(cmd).toBe("powershell");
-  expect(args).toEqual([
-    "-NoProfile",
-    "-Command",
-    "(Get-CimInstance Win32_Process -Filter 'ProcessId=9').ParentProcessId",
+  const exec = fakeExec({ run: () => ({ stdout: "  77\n" }) });
+  expect(grandparentPid(9, { platform: "darwin", exec })).toBe(77);
+  expect(exec.calls).toEqual([
+    { bin: "ps", args: ["-o", "ppid=", "-p", "9"], opts: { timeoutMs: 2000 } },
   ]);
 });
 
-test("grandparentPid returns null on spawn failure, bad exit, or non-integer output", () => {
-  const fail = () => ({ status: null, stdout: "", error: new Error("ENOENT") });
-  expect(grandparentPid(9, { platform: "darwin", spawnSync: fail as never })).toBeNull();
-  const bad = () => ({ status: 1, stdout: "3\n" });
-  expect(grandparentPid(9, { platform: "darwin", spawnSync: bad as never })).toBeNull();
-  const junk = () => ({ status: 0, stdout: "abc\n" });
-  expect(grandparentPid(9, { platform: "darwin", spawnSync: junk as never })).toBeNull();
-  const empty = () => ({ status: 0, stdout: "" });
-  expect(grandparentPid(9, { platform: "win32", spawnSync: empty as never })).toBeNull();
+test("grandparentPid parses PowerShell output on win32", () => {
+  const exec = fakeExec({ run: () => ({ stdout: "808\r\n" }) });
+  expect(grandparentPid(9, { platform: "win32", exec })).toBe(808);
+  expect(exec.calls[0]).toMatchObject({
+    bin: "powershell",
+    args: [
+      "-NoProfile",
+      "-Command",
+      "(Get-CimInstance Win32_Process -Filter 'ProcessId=9').ParentProcessId",
+    ],
+  });
+});
+
+test("grandparentPid returns null on a failed run or non-integer output", () => {
+  const failed = fakeExec({ run: () => ({ ok: false, stdout: "3\n", failure: "ENOENT" }) });
+  expect(grandparentPid(9, { platform: "darwin", exec: failed })).toBeNull();
+  const junk = fakeExec({ run: () => ({ stdout: "abc\n" }) });
+  expect(grandparentPid(9, { platform: "darwin", exec: junk })).toBeNull();
+  expect(grandparentPid(9, { platform: "win32", exec: fakeExec() })).toBeNull();
   const throws = () => {
     throw new Error("nope");
   };
-  expect(grandparentPid(9, { platform: "linux", readFile: throws })).toBeNull();
+  expect(grandparentPid(9, { platform: "linux", exec: fakeExec() }, throws)).toBeNull();
 });
 
 test("pidAlive is true for this process and false for an impossible pid", () => {

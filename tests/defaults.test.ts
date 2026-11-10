@@ -2,15 +2,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { type DefaultsDeps, runSetDefault, runUnsetDefault } from "../src/commands/defaults.js";
 import {
   setClaudeDefault,
   setCodexDefault,
   unsetClaudeDefault,
   unsetCodexDefault,
 } from "../src/core/agent-defaults.js";
+import type { Host } from "../src/host.js";
 import { captureOutput } from "./helpers/capture.js";
-import { runProgram } from "./helpers/program.js";
+import { fakeHost, runProgram } from "./helpers/program.js";
 
 const io = captureOutput();
 
@@ -25,14 +25,8 @@ function setup() {
   };
 }
 
-/** Run the real command tree with injected paths and prompt; returns the exit code. */
-const run = (argv: string[], deps: DefaultsDeps) =>
-  runProgram(argv, undefined, {
-    actions: {
-      "set-default": (o, c) => runSetDefault(o, c, deps),
-      "unset-default": (o, c) => runUnsetDefault(o, c, deps),
-    },
-  });
+/** Run the real command tree on a host with the given paths and prompt; returns the exit code. */
+const run = (argv: string[], host: Partial<Host>) => runProgram(argv, fakeHost(host));
 
 const readJson = (path: string) => JSON.parse(readFileSync(path, "utf8"));
 
@@ -128,7 +122,7 @@ test("prompts per agent when no flags are given", async () => {
     home: t.home,
     cwd: t.cwd,
     env: {},
-    isTTY: true,
+    stdinIsTTY: true,
     confirm: async (q) => {
       questions.push(q);
       return answers.shift() as boolean;
@@ -146,7 +140,7 @@ test("prompts per agent when no flags are given", async () => {
 
 test("no flags in a non-interactive run is a usage error", async () => {
   const t = setup();
-  const code = await run(["unset-default"], { home: t.home, cwd: t.cwd, env: {}, isTTY: false });
+  const code = await run(["unset-default"], { home: t.home, cwd: t.cwd, env: {} });
 
   expect(code).toBe(2);
   expect(io.stderr()).toContain("--claude");

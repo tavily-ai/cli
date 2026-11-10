@@ -1,11 +1,11 @@
 import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
-import { afterEach, expect, test, vi } from "vitest";
+import { expect, test, vi } from "vitest";
 import type { Json } from "../src/core/tavily-client.js";
 import { setTerminalOverride } from "../src/ui/text.js";
 import { captureOutput, visible } from "./helpers/capture.js";
-import { runProgram, stubClient } from "./helpers/program.js";
+import { clientHost, fakeHost, runProgram } from "./helpers/program.js";
 
 const io = captureOutput();
 const load = (name: string) =>
@@ -14,18 +14,12 @@ const crawlFixture = load("crawl");
 const mapFixture = load("map");
 const tmp = () => mkdtempSync(join(tmpdir(), "tvly-crawl-map-"));
 
-afterEach(() => vi.unstubAllEnvs());
-
 test.each([
   ["crawl", "https://a.example"],
   ["map", "https://a.example"],
   ["research", "q"],
 ])("%s without a key exits 3 with only the requires-a-key message", async (cmd, arg) => {
-  const home = tmp();
-  vi.stubEnv("HOME", home);
-  vi.stubEnv("USERPROFILE", home);
-  vi.stubEnv("TAVILY_API_KEY", "");
-  const code = await runProgram([cmd, arg], stubClient({}));
+  const code = await runProgram([cmd, arg], fakeHost());
   expect(code).toBe(3);
   expect(io.stdout()).toBe("");
   const stderr = visible(io.stderr());
@@ -35,7 +29,7 @@ test.each([
 
 test("--no-external sends false, --allow-external sends true, omission sends nothing", async () => {
   const map = vi.fn(async () => mapFixture);
-  const client = stubClient({ map });
+  const client = clientHost({ map });
   await runProgram(["map", "https://a.example", "--json", "--no-external"], client);
   await runProgram(["map", "https://a.example", "--json", "--allow-external"], client);
   await runProgram(["map", "https://a.example", "--json"], client);
@@ -79,7 +73,7 @@ test("every crawl option reaches the request body", async () => {
       "--timeout",
       "30.5",
     ],
-    stubClient({ crawl }),
+    clientHost({ crawl }),
   );
   expect(crawl).toHaveBeenCalledWith({
     url: "https://a.example",
@@ -103,7 +97,7 @@ test("crawl --output-dir writes one file per page with content and reports on st
   const dir = join(tmp(), "pages");
   const crawl = vi.fn(async () => crawlFixture);
   expect(
-    await runProgram(["crawl", "https://a.example", "--output-dir", dir], stubClient({ crawl })),
+    await runProgram(["crawl", "https://a.example", "--output-dir", dir], clientHost({ crawl })),
   ).toBe(0);
   expect(readdirSync(dir).sort()).toEqual(["a.example.md", "a.example_docs_intro.md"]);
   expect(readFileSync(join(dir, "a.example.md"), "utf8")).toBe(
@@ -121,14 +115,14 @@ test("crawl --output-dir still honours --json and -o", async () => {
   const crawl = vi.fn(async () => crawlFixture);
   await runProgram(
     ["crawl", "https://a.example", "--output-dir", dir, "--json"],
-    stubClient({ crawl }),
+    clientHost({ crawl }),
   );
   expect(JSON.parse(io.stdout())).toEqual(crawlFixture);
   expect(readdirSync(dir)).toHaveLength(2);
 
   await runProgram(
     ["crawl", "https://a.example", "--output-dir", dir, "-o", file],
-    stubClient({ crawl }),
+    clientHost({ crawl }),
   );
   expect(JSON.parse(readFileSync(file, "utf8"))).toEqual(crawlFixture);
 });
@@ -146,7 +140,7 @@ test("crawl --output-dir gives colliding slugs distinct files", async () => {
   };
   await runProgram(
     ["crawl", "https://a.example", "--output-dir", dir],
-    stubClient({ crawl: async () => data }),
+    clientHost({ crawl: async () => data }),
   );
   expect(readdirSync(dir).sort()).toEqual([
     "a.example_docs_a_b-2.md",
@@ -162,7 +156,7 @@ test("crawl --output-dir gives colliding slugs distinct files", async () => {
 test("terminal map output is a tree rooted at the base URL", async () => {
   setTerminalOverride(true);
   const map = vi.fn(async () => mapFixture);
-  await runProgram(["map", "https://a.example"], stubClient({ map }));
+  await runProgram(["map", "https://a.example"], clientHost({ map }));
   const text = visible(io.stdout());
   const lines = text.split("\n");
   expect(lines[0]).toBe("https://a.example");
@@ -174,7 +168,7 @@ test("terminal map output is a tree rooted at the base URL", async () => {
 test("terminal crawl output is a tree of paths with char counts and a preview", async () => {
   setTerminalOverride(true);
   const crawl = vi.fn(async () => crawlFixture);
-  await runProgram(["crawl", "https://a.example"], stubClient({ crawl }));
+  await runProgram(["crawl", "https://a.example"], clientHost({ crawl }));
   const text = visible(io.stdout());
   expect(text.split("\n")[0]).toBe("https://a.example");
   expect(text).toContain("├── /docs/intro/  (27 chars)");
@@ -197,11 +191,11 @@ test.each([false, true])(
     setTerminalOverride(terminal);
     await runProgram(
       ["crawl", "https://a.example"],
-      stubClient({ crawl: async () => ({ base_url: hostileBase, results: [hostilePage] }) }),
+      clientHost({ crawl: async () => ({ base_url: hostileBase, results: [hostilePage] }) }),
     );
     await runProgram(
       ["map", "https://a.example"],
-      stubClient({ map: async () => ({ base_url: hostileBase, results: [hostilePage.url] }) }),
+      clientHost({ map: async () => ({ base_url: hostileBase, results: [hostilePage.url] }) }),
     );
     // Legitimate colour and hyperlink sequences are stripped first; anything left is attacker bytes.
     const text = terminal ? visible(io.stdout()) : io.stdout();
@@ -220,7 +214,7 @@ test("crawl --output-dir keeps hostile URLs inside the target directory", async 
   };
   await runProgram(
     ["crawl", "https://a.example", "--output-dir", dir],
-    stubClient({ crawl: async () => data }),
+    clientHost({ crawl: async () => data }),
   );
   const files = readdirSync(dir).sort();
   expect(files).toEqual([".._.._x.md", "a.example_etc_passwd.md"]);

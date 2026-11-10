@@ -1,8 +1,8 @@
 /** Work out which package manager owns the running CLI, and how to upgrade it. */
-import * as childProcess from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
-import { whichOnPath } from "../util/process.js";
+import type { Host } from "../host.js";
+import type { Exec } from "../util/exec.js";
 import { compareVersions } from "../util/semver.js";
 
 const NPM_LATEST_URL = "https://registry.npmjs.org/@tavily/cli/latest";
@@ -14,14 +14,6 @@ export interface InstallInfo {
   method: InstallMethod;
   command: string[] | null;
   blockedReason: string | null;
-}
-
-export interface DetectOptions {
-  argv1?: string;
-  realpath?: (p: string) => string;
-  npmRootGlobal?: () => string | null;
-  env?: NodeJS.ProcessEnv;
-  which?: (name: string) => string | null;
 }
 
 export type GlobalManager = "npm" | "pnpm" | "yarn" | "bun";
@@ -60,51 +52,44 @@ const UNKNOWN_REASON =
 /** Forward slashes and lower case, so Windows and POSIX paths match with one set of rules. */
 const normalize = (p: string): string => p.replace(/\\/g, "/").toLowerCase();
 
+/** `normalize` for a directory: trailing slashes dropped, so `startsWith(\`${dir}/\`)` is exact. */
+function normalizeDir(p: string): string {
+  const dir = normalize(p);
+  let end = dir.length;
+  while (end > 0 && dir[end - 1] === "/") end--;
+  return dir.slice(0, end);
+}
+
 const blocked = (method: InstallMethod, reason: string): InstallInfo => ({
   method,
   command: null,
   blockedReason: reason,
 });
 
-interface ManagerDeps {
-  which: (name: string) => string | null;
-  spawnSync?: typeof childProcess.spawnSync;
-  platform?: NodeJS.Platform;
-}
-
 /** Run `npm root -g` through npm's resolved PATH entry. */
-export function npmRootGlobalDefault(deps: ManagerDeps): string | null {
-  return managerOutput("npm", ["root", "-g"], deps);
+export function npmRootGlobalDefault(host: Pick<Host, "exec">): string | null {
+  return managerOutput("npm", ["root", "-g"], host.exec);
 }
 
 /** The manager's global bin directory, where `tvly` lands after a global install. */
-export function globalBinDir(manager: GlobalManager, deps: ManagerDeps): string | null {
-  const out = managerOutput(manager, BIN_COMMANDS[manager], deps);
+export function globalBinDir(
+  manager: GlobalManager,
+  host: Pick<Host, "exec" | "platform">,
+): string | null {
+  const out = managerOutput(manager, BIN_COMMANDS[manager], host.exec);
   if (!out) return null;
-  return manager === "npm" && (deps.platform ?? process.platform) !== "win32" ? `${out}/bin` : out;
+  return manager === "npm" && host.platform !== "win32" ? `${out}/bin` : out;
 }
 
 /**
- * Run a package manager through its resolved PATH entry and return trimmed stdout. Windows needs
- * `shell: true` for the .cmd shim, and a bare name there would also find a planted `npm.cmd` in
- * the current directory.
+ * Run a package manager through its resolved PATH entry and return trimmed stdout. A bare name
+ * on Windows would also find a planted `npm.cmd` in the current directory.
  */
-function managerOutput(manager: string, args: string[], deps: ManagerDeps): string | null {
-  const bin = deps.which(manager);
+function managerOutput(manager: string, args: string[], exec: Exec): string | null {
+  const bin = exec.which(manager);
   if (!bin) return null;
-  const win = (deps.platform ?? process.platform) === "win32";
-  try {
-    const r = (deps.spawnSync ?? childProcess.spawnSync)(win ? `"${bin}"` : bin, args, {
-      encoding: "utf8",
-      timeout: 15_000,
-      windowsHide: true,
-      shell: win,
-    });
-    if (r.error || r.status !== 0) return null;
-    return String(r.stdout).trim() || null;
-  } catch {
-    return null;
-  }
+  const r = exec.run(bin, args, { timeoutMs: 15_000 });
+  return r.ok ? r.stdout.trim() || null : null;
 }
 
 /** Walk up from a file to the directory holding the nearest package.json, or null if there is none. */
@@ -116,9 +101,9 @@ function packageDir(file: string): string | null {
   }
 }
 
-function safeRealpath(p: string, realpath: (p: string) => string): string {
+export function safeRealpath(p: string): string {
   try {
-    return realpath(p);
+    return realpathSync(p);
   } catch {
     return p;
   }
@@ -126,8 +111,7 @@ function safeRealpath(p: string, realpath: (p: string) => string): string {
 
 /** Which package manager launched this run (Firecrawl's heuristic, plus yarn). */
 export function detectPackageManager(
-  env: NodeJS.ProcessEnv = process.env,
-  argv: string[] = process.argv,
+  { env, argv }: Pick<Host, "env" | "argv">,
   versions: NodeJS.ProcessVersions = process.versions,
 ): GlobalManager {
   // Install and runner paths identify the manager without lifecycle metadata.
@@ -142,13 +126,16 @@ export function detectPackageManager(
   return "npm";
 }
 
-export function detectInstall(opts: DetectOptions = {}): InstallInfo {
-  const env = opts.env ?? process.env;
-  const raw = opts.argv1 ?? process.argv[1] ?? "";
-  const real = safeRealpath(raw, opts.realpath ?? realpathSync);
+/** How this CLI was installed; `npmRootGlobal` replaces the `npm root -g` run. */
+export function detectInstall(
+  host: Pick<Host, "argv" | "env" | "exec">,
+  npmRootGlobal: () => string | null = () => npmRootGlobalDefault(host),
+): InstallInfo {
+  const { env } = host;
+  const raw = host.argv[1] ?? "";
+  const real = safeRealpath(raw);
   const normReal = normalize(real);
   const normRaw = normalize(raw);
-  const which = opts.which ?? ((name: string) => whichOnPath(name, env));
 
   if (normReal.includes("/_npx/")) return blocked("npx", NPX_REASON);
 
@@ -160,7 +147,7 @@ export function detectInstall(opts: DetectOptions = {}): InstallInfo {
     return blocked("source", SOURCE_REASON);
   }
 
-  const pnpmHome = env.PNPM_HOME ? normalize(env.PNPM_HOME).replace(/\/+$/, "") : null;
+  const pnpmHome = env.PNPM_HOME ? normalizeDir(env.PNPM_HOME) : null;
   let method: InstallMethod = "unknown";
   if (normReal.includes("/pnpm/global/") || (pnpmHome && normReal.startsWith(`${pnpmHome}/`))) {
     method = "pnpm";
@@ -169,15 +156,15 @@ export function detectInstall(opts: DetectOptions = {}): InstallInfo {
   } else if (normReal.includes("/.bun/install/global/")) {
     method = "bun";
   } else {
-    const root = (opts.npmRootGlobal ?? (() => npmRootGlobalDefault({ which })))();
+    const root = npmRootGlobal();
     if (root) {
-      const normRoot = normalize(root).replace(/\/+$/, "");
+      const normRoot = normalizeDir(root);
       if (normReal.startsWith(`${normRoot}/`)) method = "npm";
     }
   }
 
   if (method === "unknown") return blocked("unknown", UNKNOWN_REASON);
-  const manager = which(method);
+  const manager = host.exec.which(method);
   if (!manager) {
     return blocked(
       method,
@@ -191,7 +178,7 @@ export function detectInstall(opts: DetectOptions = {}): InstallInfo {
 
 /** The latest published Tavily CLI version, from the npm registry; `signal` replaces the 10 s timeout. */
 export async function fetchLatestVersion(
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch,
   signal: AbortSignal = AbortSignal.timeout(10_000),
 ): Promise<string> {
   let data: unknown;

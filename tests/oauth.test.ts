@@ -1,4 +1,3 @@
-import type { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { connect } from "node:net";
 import { describe, expect, test, vi } from "vitest";
@@ -9,7 +8,6 @@ import {
   generatePkce,
   looksHeadless,
   type OAuthMetadata,
-  openBrowser,
   type RegisteredClient,
   refreshTokens,
   registerClient,
@@ -486,31 +484,6 @@ describe("browser login", () => {
       await fetch(`${origin}/callback?code=abc&state=${state}`);
       const out = await settled;
       expect(out.ok && out.value.tokens.accessToken).toBe("tok");
-    });
-  });
-
-  describe("openBrowser", () => {
-    const run = (platform: NodeJS.Platform) => {
-      const unref = vi.fn();
-      const spawnImpl = vi.fn(() => ({ unref, on: vi.fn() })) as unknown as typeof spawn;
-      const orig = Object.getOwnPropertyDescriptor(process, "platform");
-      Object.defineProperty(process, "platform", { value: platform });
-      try {
-        openBrowser("https://x/y", spawnImpl);
-      } finally {
-        if (orig) Object.defineProperty(process, "platform", orig);
-      }
-      return { spawnImpl, unref };
-    };
-
-    test.each([
-      ["darwin", "open", ["https://x/y"]],
-      ["linux", "xdg-open", ["https://x/y"]],
-      ["win32", "rundll32", ["url.dll,FileProtocolHandler", "https://x/y"]],
-    ] as const)("%s", (platform, cmd, args) => {
-      const { spawnImpl, unref } = run(platform);
-      expect(spawnImpl).toHaveBeenCalledWith(cmd, args, { detached: true, stdio: "ignore" });
-      expect(unref).toHaveBeenCalled();
     });
   });
 });

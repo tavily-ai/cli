@@ -2,7 +2,6 @@
 import type { Command } from "commander";
 import {
   authMethod,
-  type ConfigOptions,
   clearCredentials,
   configPaths,
   getApiKey,
@@ -11,15 +10,16 @@ import {
 } from "../core/config.js";
 import { looksHeadless, runBrowserLogin } from "../core/oauth.js";
 import { ExitError, OAuthError } from "../errors.js";
+import type { Host } from "../host.js";
 import { spinner } from "../ui/spinner.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, LOGO, out } from "../ui/theme.js";
 import { getApiKeyOrExit } from "./credential.js";
 import { resolveJson } from "./options.js";
 
-export interface AuthDeps extends ConfigOptions {
+/** The one function injection: tests replace the interactive browser login. */
+export interface LoginHooks {
   login?: typeof runBrowserLogin;
-  openImpl?: (url: string) => void;
 }
 
 interface LoginOptions {
@@ -34,18 +34,19 @@ const ENV_CREDENTIAL_WARNING =
 export async function runLogin(
   opts: LoginOptions,
   cmd: Command,
-  deps: AuthDeps = {},
+  host: Host,
+  hooks: LoginHooks = {},
 ): Promise<void> {
   const json = resolveJson(cmd);
-  const configFile = configPaths(deps.home).file;
+  const configFile = configPaths(host.home).file;
 
   if (opts.apiKey) {
-    await saveApiKey(opts.apiKey, deps);
+    await saveApiKey(opts.apiKey, host);
     printLoginSuccess("API key", `Saved to ${configFile}`, json);
     return;
   }
 
-  const openBrowser = !(opts.browser === false || looksHeadless(deps.env));
+  const openBrowser = !(opts.browser === false || looksHeadless(host.env, host.platform));
   const showUrl = (rawUrl: string) => {
     const url = sanitizeControl(rawUrl);
     if (json) {
@@ -81,15 +82,15 @@ export async function runLogin(
     spin = waiting();
   };
   try {
-    const session = await (deps.login ?? runBrowserLogin)({
+    const session = await (hooks.login ?? runBrowserLogin)({
       openBrowser,
       // Always report the URL: a browser launch can fail silently, even in --json mode.
       onStatus,
-      ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
-      ...(deps.openImpl ? { openImpl: deps.openImpl } : {}),
+      fetchImpl: host.fetch,
+      openImpl: host.openUrl,
     });
     spin.stop();
-    await saveOauthSession(session, deps);
+    await saveOauthSession(session, host);
   } catch (e) {
     spin.stop();
     if (e instanceof OAuthError) failLogin(e.message, json);
@@ -142,10 +143,10 @@ function failLogin(message: string, json: boolean): never {
 }
 
 /** The effective credential and where it came from. */
-function effectiveAuthState(key: string | null, deps: AuthDeps) {
+function effectiveAuthState(key: string | null, host: Host) {
   if (!key) return { key: null, method: null, source: null };
-  const method = authMethod(key, deps);
-  const { file } = configPaths(deps.home);
+  const method = authMethod(key, host);
+  const { file } = configPaths(host.home);
   const source = {
     env: "TAVILY_API_KEY environment variable",
     oauth: `OAuth (${file})`,
@@ -158,11 +159,11 @@ function effectiveAuthState(key: string | null, deps: AuthDeps) {
 export async function runLogout(
   _opts: Record<string, never>,
   cmd: Command,
-  deps: AuthDeps = {},
+  host: Host,
 ): Promise<void> {
   const json = resolveJson(cmd);
-  const result = await clearCredentials(deps);
-  const { key, method, source } = effectiveAuthState(await getApiKey(deps), deps);
+  const result = await clearCredentials(host);
+  const { key, method, source } = effectiveAuthState(await getApiKey(host), host);
   const envPresent = method === "env";
   const payload: Record<string, unknown> = {
     authenticated: key !== null,
@@ -210,10 +211,10 @@ export async function runLogout(
 export async function runAuth(
   _opts: Record<string, never>,
   cmd: Command,
-  deps: AuthDeps = {},
+  host: Host,
 ): Promise<void> {
   const json = resolveJson(cmd);
-  const { key, method, source } = effectiveAuthState(await getApiKeyOrExit(json, deps), deps);
+  const { key, method, source } = effectiveAuthState(await getApiKeyOrExit(json, host), host);
   if (json) {
     out(JSON.stringify({ authenticated: key !== null, method, source }));
     return;

@@ -1,10 +1,10 @@
 /** tvly search — web search via the Tavily API; up to 5 queries run in parallel. */
 import { TavilyKeylessLimitError, TavilyRequestError } from "@tavily/core";
 import { type Command, Option } from "commander";
-import type { Context } from "../context.js";
 import { applySearchFlags, searchBodyFromOptions } from "../core/search-flags.js";
 import type { Json } from "../core/tavily-client.js";
 import { ExitError, messageOf } from "../errors.js";
+import type { Host } from "../host.js";
 import { keylessCapError, printKeylessCapHit } from "../ui/keyless.js";
 import { resolveOutput } from "../ui/render/emit.js";
 import { printMultiSearchResults, printSearchResults } from "../ui/render/search.js";
@@ -47,7 +47,7 @@ export async function run(
   args: string[],
   opts: SearchOptions,
   cmd: Command,
-  ctx: Context,
+  host: Host,
 ): Promise<void> {
   const json = resolveJson(cmd);
   const queries = readQueries(args, cmd);
@@ -58,7 +58,7 @@ export async function run(
 
   const call = { label: "Searching...", keyed: false as const, clientName: opts.clientName };
   if (queries.length === 1) {
-    const response = await invoke(cmd, ctx, call, (client) =>
+    const response = await invoke(cmd, host, call, (client) =>
       client.search({ query: queries[0], ...body }),
     );
     await printSearchResults(response, { json, outputFile, maxChars });
@@ -67,7 +67,7 @@ export async function run(
 
   const capHits: TavilyKeylessLimitError[] = [];
   let limitHit = false;
-  const responses = await invoke(cmd, ctx, call, (client) =>
+  const responses = await invoke(cmd, host, call, (client) =>
     Promise.all(
       queries.map(async (query): Promise<Json> => {
         try {

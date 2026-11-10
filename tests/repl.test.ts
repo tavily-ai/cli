@@ -8,6 +8,7 @@ import { describe, expect, test, vi } from "vitest";
 import { ExitError } from "../src/errors.js";
 import { runRepl } from "../src/repl.js";
 import { splitShellWords } from "../src/util/shell-words.js";
+import { fakeHost } from "./helpers/host.js";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escapes
 const ANSI = /\x1b\[[0-9;]*m/g;
@@ -33,7 +34,7 @@ function setup(program: () => Command, lines: string[], rawLog?: Array<boolean |
   const home = mkdtempSync(join(tmpdir(), "tvly-repl-"));
   const env = { TAVILY_API_KEY: "" } as NodeJS.ProcessEnv;
   return {
-    run: () => runRepl({ input, output, program, home, env }),
+    run: () => runRepl(fakeHost({ home, env }), { input, output, program }),
     text: () => text.replace(ANSI, ""),
   };
 }
@@ -163,7 +164,7 @@ test("a prompt inside a command owns stdin; its answer is not replayed as a REPL
   };
   input.write("ask\n");
   const home = mkdtempSync(join(tmpdir(), "tvly-repl-"));
-  await runRepl({ input, output, program, home, env: { TAVILY_API_KEY: "" } as NodeJS.ProcessEnv });
+  await runRepl(fakeHost({ home, env: { TAVILY_API_KEY: "" } }), { input, output, program });
   expect(answers).toEqual(["y"]);
   expect(text).not.toContain("unknown command");
   expect(text).toContain("Goodbye!");

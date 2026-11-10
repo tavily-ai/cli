@@ -1,6 +1,6 @@
 /** tvly extract — extract content from URLs via the Tavily API. */
 import type { Command } from "commander";
-import type { Context } from "../context.js";
+import type { Host } from "../host.js";
 import { resolveOutput } from "../ui/render/emit.js";
 import { printExtractResults } from "../ui/render/extract.js";
 import { domainOf } from "../ui/text.js";
@@ -25,7 +25,7 @@ export async function run(
   urls: string[],
   opts: ExtractOptions,
   cmd: Command,
-  ctx: Context,
+  host: Host,
 ): Promise<void> {
   const json = resolveJson(cmd);
   if (urls.length > MAX_URLS) cmd.error(`error: Maximum ${MAX_URLS} URLs per request.`);
@@ -46,7 +46,7 @@ export async function run(
   const label = `Extracting ${urls.length} URL${urls.length > 1 ? "s" : ""}...`;
   const response = await invoke(
     cmd,
-    ctx,
+    host,
     { label, keyed: false, clientName: opts.clientName },
     (client) => client.extract(body),
   );

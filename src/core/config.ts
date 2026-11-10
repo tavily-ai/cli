@@ -7,11 +7,11 @@
 import { randomBytes } from "node:crypto";
 import { readdirSync, readFileSync, rmSync } from "node:fs";
 import fs from "node:fs/promises";
-import { homedir } from "node:os";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import lockfile from "proper-lockfile";
 import { isObject, messageOf, OAuthError } from "../errors.js";
+import type { Host } from "../host.js";
 import {
   fetchMetadata,
   MCP_ISSUER,
@@ -24,23 +24,20 @@ import {
 
 export type Config = Record<string, unknown>;
 
-export interface ConfigOptions {
-  home?: string;
-  env?: NodeJS.ProcessEnv;
-  fetchImpl?: typeof fetch;
-}
+/** What credential storage reads from the machine. */
+export type ConfigHost = Pick<Host, "home" | "env" | "fetch" | "platform">;
 
 export interface ClearCredentialsResult {
   serverRevoked: boolean | null;
   revocationError?: string;
 }
 
-export function configPaths(home?: string) {
-  const dir = path.join(home ?? homedir(), ".tavily");
+export function configPaths(home: string) {
+  const dir = path.join(home, ".tavily");
   return {
     dir,
     file: path.join(dir, "config.json"),
-    mcpAuthDir: path.join(home ?? homedir(), ".mcp-auth"),
+    mcpAuthDir: path.join(home, ".mcp-auth"),
   };
 }
 
@@ -48,9 +45,9 @@ function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value !== "";
 }
 
-export function readConfig(opts: ConfigOptions = {}): Config {
+export function readConfig(host: ConfigHost): Config {
   try {
-    const data: unknown = JSON.parse(readFileSync(configPaths(opts.home).file, "utf8"));
+    const data: unknown = JSON.parse(readFileSync(configPaths(host.home).file, "utf8"));
     return isObject(data) ? data : {};
   } catch {
     return {};
@@ -58,23 +55,23 @@ export function readConfig(opts: ConfigOptions = {}): Config {
 }
 
 /** chmod that is a no-op failure on Windows, where POSIX modes do not apply. */
-async function chmod(target: string, mode: number): Promise<void> {
+async function chmod(target: string, mode: number, platform: NodeJS.Platform): Promise<void> {
   try {
     await fs.chmod(target, mode);
   } catch (e) {
-    if (process.platform !== "win32") throw e;
+    if (platform !== "win32") throw e;
   }
 }
 
-async function ensureConfigDir(dir: string): Promise<void> {
+async function ensureConfigDir(dir: string, platform: NodeJS.Platform): Promise<void> {
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
-  await chmod(dir, 0o700);
+  await chmod(dir, 0o700, platform);
 }
 
 /** Atomically replace config.json (or delete it when empty); caller holds the lock. */
-async function writeConfigUnlocked(config: Config, opts: ConfigOptions): Promise<void> {
-  const { dir, file } = configPaths(opts.home);
-  await ensureConfigDir(dir);
+async function writeConfigUnlocked(config: Config, host: ConfigHost): Promise<void> {
+  const { dir, file } = configPaths(host.home);
+  await ensureConfigDir(dir, host.platform);
   if (Object.keys(config).length === 0) {
     await fs.rm(file, { force: true });
     return;
@@ -88,7 +85,7 @@ async function writeConfigUnlocked(config: Config, opts: ConfigOptions): Promise
     } finally {
       await handle.close();
     }
-    await chmod(temp, 0o600);
+    await chmod(temp, 0o600, host.platform);
     await fs.rename(temp, file);
   } finally {
     await fs.rm(temp, { force: true });
@@ -102,10 +99,10 @@ async function writeConfigUnlocked(config: Config, opts: ConfigOptions): Promise
  */
 export async function withConfigLock<T>(
   fn: (config: Config) => Promise<{ config?: Config; result: T }>,
-  opts: ConfigOptions = {},
+  host: ConfigHost,
 ): Promise<T> {
-  const { dir, file } = configPaths(opts.home);
-  await ensureConfigDir(dir);
+  const { dir, file } = configPaths(host.home);
+  await ensureConfigDir(dir, host.platform);
   const release = await lockfile.lock(file, {
     lockfilePath: path.join(dir, ".config.lock"),
     stale: 30_000,
@@ -118,8 +115,8 @@ export async function withConfigLock<T>(
     onCompromised: () => {},
   });
   try {
-    const { config, result } = await fn(readConfig(opts));
-    if (config !== undefined) await writeConfigUnlocked(config, opts);
+    const { config, result } = await fn(readConfig(host));
+    if (config !== undefined) await writeConfigUnlocked(config, host);
     return result;
   } finally {
     await release().catch((e: unknown) => {
@@ -149,34 +146,31 @@ function withoutKeys(config: Config, ...keys: string[]): Config {
 }
 
 /** Replace stored credentials with an API key, revoking old OAuth first (best effort). */
-export async function saveApiKey(apiKey: string, opts: ConfigOptions = {}): Promise<void> {
+export async function saveApiKey(apiKey: string, host: ConfigHost): Promise<void> {
   await withConfigLock(async (config) => {
     if (isObject(config.oauth)) {
       try {
-        await revokeStoredOauth(config.oauth, opts);
+        await revokeStoredOauth(config.oauth, host);
       } catch {
         // Like clearCredentials: an offline or incomplete OAuth session must not block saving the key.
       }
     }
     return { config: { ...withoutKeys(config, "oauth"), api_key: apiKey }, result: undefined };
-  }, opts);
+  }, host);
 }
 
 /** Replace stored credentials with a newly authorized OAuth session. */
-export async function saveOauthSession(
-  session: OAuthSession,
-  opts: ConfigOptions = {},
-): Promise<void> {
+export async function saveOauthSession(session: OAuthSession, host: ConfigHost): Promise<void> {
   const replacement = oauthSessionData(session);
   await withConfigLock(async (config) => {
     const previous = config.oauth;
     if (isObject(previous) && !isDeepStrictEqual(previous, replacement)) {
       try {
-        await revokeStoredOauth(previous, opts);
+        await revokeStoredOauth(previous, host);
       } catch (previousError) {
         if (!(previousError instanceof OAuthError)) throw previousError;
         try {
-          await revokeStoredOauth(replacement, opts);
+          await revokeStoredOauth(replacement, host);
         } catch (cleanupError) {
           if (!(cleanupError instanceof OAuthError)) throw cleanupError;
           throw new OAuthError(
@@ -190,38 +184,38 @@ export async function saveOauthSession(
       }
     }
     return { config: { ...withoutKeys(config, "api_key"), oauth: replacement }, result: undefined };
-  }, opts);
+  }, host);
 }
 
 /** True when ~/.tavily/config.json holds a native OAuth session. */
-export function hasStoredOauth(opts: ConfigOptions = {}): boolean {
-  const data = readConfig(opts).oauth;
+export function hasStoredOauth(host: ConfigHost): boolean {
+  const data = readConfig(host).oauth;
   return isObject(data) && typeof data.access_token === "string";
 }
 
 /** Optional human_id: env var > config file; null when unset. */
-export function getHumanId(opts: ConfigOptions = {}): string | null {
-  const value = (opts.env ?? process.env).TAVILY_HUMAN_ID;
+export function getHumanId(host: ConfigHost): string | null {
+  const value = host.env.TAVILY_HUMAN_ID;
   if (value) return value;
-  const configured = readConfig(opts).human_id;
+  const configured = readConfig(host).human_id;
   return typeof configured === "string" ? configured : null;
 }
 
 /** Optional API base URL: env var > config file, trailing slashes stripped. */
-export function getApiBaseUrl(opts: ConfigOptions = {}): string | null {
+export function getApiBaseUrl(host: ConfigHost): string | null {
   const stripSlashes = (url: string) => url.replace(/\/+$/, "");
-  const value = (opts.env ?? process.env).TAVILY_API_BASE_URL;
+  const value = host.env.TAVILY_API_BASE_URL;
   if (value) return stripSlashes(value);
-  const configured = readConfig(opts).api_base_url;
+  const configured = readConfig(host).api_base_url;
   return nonEmptyString(configured) ? stripSlashes(configured) : null;
 }
 
-export async function clearCredentials(opts: ConfigOptions = {}): Promise<ClearCredentialsResult> {
+export async function clearCredentials(host: ConfigHost): Promise<ClearCredentialsResult> {
   const result = await withConfigLock(async (config) => {
     const outcome: ClearCredentialsResult = { serverRevoked: null };
     if (isObject(config.oauth)) {
       try {
-        if (await revokeStoredOauth(config.oauth, opts)) outcome.serverRevoked = true;
+        if (await revokeStoredOauth(config.oauth, host)) outcome.serverRevoked = true;
       } catch (e) {
         // Logout must still remove local credentials even when the remote session
         // cannot be revoked; the command reports the partial result and exits non-zero.
@@ -230,8 +224,8 @@ export async function clearCredentials(opts: ConfigOptions = {}): Promise<ClearC
       }
     }
     return { config: withoutKeys(config, "api_key", "oauth"), result: outcome };
-  }, opts);
-  clearMcpTokens(opts);
+  }, host);
+  clearMcpTokens(host);
   return result;
 }
 
@@ -262,8 +256,8 @@ function isValidTavilyToken(token: string): boolean {
 }
 
 /** Access tokens from every `*_tokens.json` under ~/.mcp-auth, with their paths. */
-function mcpTokenFiles(opts: ConfigOptions): { file: string; token: unknown }[] {
-  const root = configPaths(opts.home).mcpAuthDir;
+function mcpTokenFiles(host: ConfigHost): { file: string; token: unknown }[] {
+  const root = configPaths(host.home).mcpAuthDir;
   let names: string[];
   try {
     names = readdirSync(root, { recursive: true, encoding: "utf8" });
@@ -284,8 +278,8 @@ function mcpTokenFiles(opts: ConfigOptions): { file: string; token: unknown }[] 
   return found;
 }
 
-function getMcpToken(opts: ConfigOptions): string | null {
-  for (const { token } of mcpTokenFiles(opts)) {
+function getMcpToken(host: ConfigHost): string | null {
+  for (const { token } of mcpTokenFiles(host)) {
     if (nonEmptyString(token) && isValidTavilyToken(token)) return token;
   }
   return null;
@@ -295,8 +289,8 @@ function getMcpToken(opts: ConfigOptions): string | null {
  * Remove Tavily-issued tokens from ~/.mcp-auth regardless of expiry, leaving other
  * MCP tools' tokens untouched.
  */
-function clearMcpTokens(opts: ConfigOptions): void {
-  for (const { file, token } of mcpTokenFiles(opts)) {
+function clearMcpTokens(host: ConfigHost): void {
+  for (const { file, token } of mcpTokenFiles(host)) {
     if (!nonEmptyString(token) || !isTavilyToken(token)) continue;
     try {
       rmSync(file);
@@ -319,7 +313,7 @@ function oauthClientFromConfig(data: Config): RegisteredClient | null {
 }
 
 /** Revoke stored refresh then access tokens; returns whether any were attempted. */
-export async function revokeStoredOauth(data: Config, opts: ConfigOptions = {}): Promise<boolean> {
+export async function revokeStoredOauth(data: Config, host: ConfigHost): Promise<boolean> {
   const present = (["refresh_token", "access_token"] as const).flatMap((key) => {
     const token = data[key];
     return nonEmptyString(token) ? [{ key, token }] : [];
@@ -332,11 +326,11 @@ export async function revokeStoredOauth(data: Config, opts: ConfigOptions = {}):
       "Stored OAuth client metadata is incomplete; server revocation was not attempted.",
     );
   }
-  const metadata = await fetchMetadata(opts.fetchImpl);
+  const metadata = await fetchMetadata(host.fetch);
   const errors: string[] = [];
   for (const { key, token } of present) {
     try {
-      await revokeToken(metadata, client, token, { tokenTypeHint: key }, opts.fetchImpl);
+      await revokeToken(metadata, client, token, { tokenTypeHint: key }, host.fetch);
     } catch (e) {
       if (!(e instanceof OAuthError)) throw e;
       errors.push(`${key}: ${e.message}`);
@@ -347,7 +341,7 @@ export async function revokeStoredOauth(data: Config, opts: ConfigOptions = {}):
 }
 
 /** A usable OAuth access token, refreshing and persisting when expired; caller holds the lock. */
-async function oauthAccessToken(config: Config, opts: ConfigOptions): Promise<string | null> {
+async function oauthAccessToken(config: Config, host: ConfigHost): Promise<string | null> {
   const data = config.oauth;
   if (!isObject(data)) return null;
   const access = data.access_token;
@@ -359,14 +353,14 @@ async function oauthAccessToken(config: Config, opts: ConfigOptions): Promise<st
   if (!nonEmptyString(refresh) || client === null) return null;
   try {
     const tokens = await refreshTokens(
-      await fetchMetadata(opts.fetchImpl),
+      await fetchMetadata(host.fetch),
       client,
       refresh,
-      opts.fetchImpl,
+      host.fetch,
     );
     // The refreshed session replaces the stored one without revoking it.
     const oauth = oauthSessionData({ tokens, client });
-    await writeConfigUnlocked({ ...withoutKeys(config, "api_key"), oauth }, opts);
+    await writeConfigUnlocked({ ...withoutKeys(config, "api_key"), oauth }, host);
     return tokens.accessToken;
   } catch (e) {
     throw new OAuthError(
@@ -378,13 +372,13 @@ async function oauthAccessToken(config: Config, opts: ConfigOptions): Promise<st
 }
 
 /** Resolve credentials: env var > API key in config > OAuth in config > legacy ~/.mcp-auth. */
-export async function getApiKey(opts: ConfigOptions = {}): Promise<string | null> {
-  const envKey = (opts.env ?? process.env).TAVILY_API_KEY;
+export async function getApiKey(host: ConfigHost): Promise<string | null> {
+  const envKey = host.env.TAVILY_API_KEY;
   if (envKey) return envKey;
 
   // Read without the lock (or creating ~/.tavily) so keyless use works with an unwritable HOME;
   // only an expired OAuth session, which refreshes and writes, takes the lock and re-reads.
-  const config = readConfig(opts);
+  const config = readConfig(host);
   if (nonEmptyString(config.api_key)) return config.api_key;
   const oauth = config.oauth;
   const needsRefresh =
@@ -392,10 +386,10 @@ export async function getApiKey(opts: ConfigOptions = {}): Promise<string | null
   const stored = needsRefresh
     ? await withConfigLock(async (fresh) => {
         if (nonEmptyString(fresh.api_key)) return { result: fresh.api_key };
-        return { result: await oauthAccessToken(fresh, opts) };
-      }, opts)
-    : await oauthAccessToken(config, opts);
-  return stored ?? getMcpToken(opts);
+        return { result: await oauthAccessToken(fresh, host) };
+      }, host)
+    : await oauthAccessToken(config, host);
+  return stored ?? getMcpToken(host);
 }
 
 /** True for an MCP OAuth JWT (as opposed to a tvly-* API key). */
@@ -406,17 +400,17 @@ export function isOauthToken(key: string): boolean {
 /** How `key`, as `getApiKey` resolved it, was found. */
 export function authMethod(
   key: string,
-  opts: ConfigOptions = {},
+  host: ConfigHost,
 ): "env" | "oauth" | "oauth_legacy" | "api_key" {
-  if ((opts.env ?? process.env).TAVILY_API_KEY) return "env";
-  if (isOauthToken(key)) return hasStoredOauth(opts) ? "oauth" : "oauth_legacy";
+  if (host.env.TAVILY_API_KEY) return "env";
+  if (isOauthToken(key)) return hasStoredOauth(host) ? "oauth" : "oauth_legacy";
   return "api_key";
 }
 
 /** Describe how the user is authenticated. */
 export function authSource(
   key: string,
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv,
 ): "TAVILY_API_KEY" | "OAuth (tvly login)" | "API key" {
   if (env.TAVILY_API_KEY) return "TAVILY_API_KEY";
   if (isOauthToken(key)) return "OAuth (tvly login)";

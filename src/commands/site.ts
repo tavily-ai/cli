@@ -1,6 +1,6 @@
 /** tvly crawl and tvly map — walk a website via the Tavily API (both need an API key). */
 import type { Command } from "commander";
-import type { Context } from "../context.js";
+import type { Host } from "../host.js";
 import { printCrawlResults, printMapResults } from "../ui/render/crawl.js";
 import { resolveOutput } from "../ui/render/emit.js";
 import { hostOf } from "../ui/text.js";
@@ -57,7 +57,7 @@ export async function runCrawl(
   url: string,
   opts: CrawlOptions,
   cmd: Command,
-  ctx: Context,
+  host: Host,
 ): Promise<void> {
   const json = resolveJson(cmd);
   const outputFile = resolveOutput(opts.output, "crawl", hostOf(url));
@@ -67,7 +67,7 @@ export async function runCrawl(
   };
   const response = await invoke(
     cmd,
-    ctx,
+    host,
     { label: `Crawling ${url}...`, keyed: "crawl", clientName: opts.clientName },
     (client) => client.crawl(body),
   );
@@ -78,13 +78,13 @@ export async function runMap(
   url: string,
   opts: SiteOptions,
   cmd: Command,
-  ctx: Context,
+  host: Host,
 ): Promise<void> {
   const json = resolveJson(cmd);
   const outputFile = resolveOutput(opts.output, "map", hostOf(url));
   const response = await invoke(
     cmd,
-    ctx,
+    host,
     { label: `Mapping ${url}...`, keyed: "map", clientName: opts.clientName },
     (client) => client.map(siteBody(url, opts)),
   );

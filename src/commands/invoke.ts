@@ -1,9 +1,9 @@
 /** The API request path: credential → client → spinner → call → errors as exit codes. */
 import { TavilyKeylessLimitError, TavilyRequestError } from "@tavily/core";
 import type { Command } from "commander";
-import type { Context } from "../context.js";
 import type { TavilyClientLike } from "../core/tavily-client.js";
 import { ExitError, messageOf } from "../errors.js";
+import type { Host } from "../host.js";
 import { keylessCapError, printKeylessCapHit } from "../ui/keyless.js";
 import { withSpinner } from "../ui/spinner.js";
 import { safeLink, sanitizeControl } from "../ui/text.js";
@@ -27,14 +27,14 @@ const AUTH_STATUSES: ReadonlySet<number> = new Set([401, 403]);
 /** Run `fn` against the resolved client, turning keyless cap, OAuth refresh, and API failures into exit codes. */
 export async function invoke<T>(
   cmd: Command,
-  ctx: Context,
+  host: Host,
   opts: InvokeOptions,
   fn: (client: TavilyClientLike) => Promise<T>,
 ): Promise<T> {
   const json = resolveJson(cmd);
-  const key = await getApiKeyOrExit(json);
+  const key = await getApiKeyOrExit(json, host);
   if (opts.keyed && !key) requireKey(opts.keyed);
-  const client = await ctx.resolveClient(key, opts.clientName);
+  const client = await host.resolveClient(key, opts.clientName);
   try {
     const { label } = opts;
     return label === undefined

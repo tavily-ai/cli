@@ -8,7 +8,7 @@ import { sseDataLines } from "../src/core/sse.js";
 import type { Json } from "../src/core/tavily-client.js";
 import { setTerminalOverride } from "../src/ui/text.js";
 import { captureOutput, visible } from "./helpers/capture.js";
-import { runProgram, stubClient } from "./helpers/program.js";
+import { clientHost, runProgram } from "./helpers/program.js";
 
 const io = captureOutput();
 const tmp = () => mkdtempSync(join(tmpdir(), "tvly-research-"));
@@ -20,7 +20,7 @@ async function* fixtureChunks(): AsyncIterable<string> {
   yield FIXTURE;
 }
 const streamClient = (research = vi.fn()) =>
-  stubClient({
+  clientHost({
     researchStream: async (body) => {
       research(body);
       return sseDataLines(fixtureChunks());
@@ -34,7 +34,7 @@ function pendingClient(...statuses: Json[]) {
   const getResearch = vi.fn(
     async (_id: string) => statuses[Math.min(i++, statuses.length - 1)] ?? {},
   );
-  return { client: stubClient({ research, getResearch }), research, getResearch };
+  return { client: clientHost({ research, getResearch }), research, getResearch };
 }
 
 afterEach(() => {
@@ -42,7 +42,7 @@ afterEach(() => {
 });
 
 test("bare `research` prints the group help and exits 0", async () => {
-  expect(await runProgram(["research"], stubClient({}))).toBe(0);
+  expect(await runProgram(["research"], clientHost({}))).toBe(0);
   expect(io.stdout()).toContain("Usage: tvly research [options] [command]");
   expect(io.stdout()).toContain("tvly research status <id>");
 });
@@ -99,7 +99,7 @@ test("a first response that is already complete is printed without polling", asy
     content: "See [source](https://s.example).",
     sources: [{ title: "S", url: "https://s.example" }],
   }));
-  expect(await runProgram(["research", "q"], stubClient({ research }))).toBe(0);
+  expect(await runProgram(["research", "q"], clientHost({ research }))).toBe(0);
   // test_output.py::test_piped_map_crawl_and_research (research half)
   expect(io.stdout()).toBe(
     "See [source](https://s.example).\n\nSources:\n1. S https://s.example\n",
@@ -108,14 +108,14 @@ test("a first response that is already complete is printed without polling", asy
 
 test("a response with neither a result nor a request id is an API error", async () => {
   const research = vi.fn(async () => ({ status: "pending" }));
-  expect(await runProgram(["research", "q", "--json"], stubClient({ research }))).toBe(4);
+  expect(await runProgram(["research", "q", "--json"], clientHost({ research }))).toBe(4);
   expect(JSON.parse(io.stdout()).error).toContain("Unexpected API response");
 });
 
 test("a non-completed result prints its status and error", async () => {
   setTerminalOverride(false);
   const research = vi.fn(async () => ({ status: "failed", error: "boom\x1b[2J" }));
-  await runProgram(["research", "q"], stubClient({ research }));
+  await runProgram(["research", "q"], clientHost({ research }));
   expect(io.stdout()).toBe("Status: failed\nError: boom[2J\n");
 });
 
@@ -127,7 +127,7 @@ test("terminal report: heading, markdown, sources table, and footer", async () =
     sources: [{ title: "Alpha", url: "https://a.example" }],
     response_time: 2.5,
   }));
-  await runProgram(["research", "q"], stubClient({ research }));
+  await runProgram(["research", "q"], clientHost({ research }));
   const text = visible(io.stdout());
   expect(text).toContain("Research Report");
   expect(text).toContain("Body text");
@@ -156,7 +156,7 @@ test("every run option reaches the request body; -o saves the result", async () 
       "-o",
       out,
     ],
-    stubClient({ research }),
+    clientHost({ research }),
   );
   expect(research).toHaveBeenCalledWith({
     input: "q",
@@ -171,27 +171,27 @@ test("--output-schema that is missing or not JSON is a usage error", async () =>
   const research = vi.fn(async () => COMPLETED);
   const missing = join(tmp(), "nope.json");
   expect(
-    await runProgram(["research", "q", "--output-schema", missing], stubClient({ research })),
+    await runProgram(["research", "q", "--output-schema", missing], clientHost({ research })),
   ).toBe(2);
   expect(io.stderr()).toContain("--output-schema must be a path to a JSON file:");
   const bad = join(tmp(), "bad.json");
   writeFileSync(bad, "{not json");
   expect(
-    await runProgram(["research", "q", "--output-schema", bad], stubClient({ research })),
+    await runProgram(["research", "q", "--output-schema", bad], clientHost({ research })),
   ).toBe(2);
   expect(research).not.toHaveBeenCalled();
 });
 
 test("query from stdin; an empty query is a usage error", async () => {
   const research = vi.fn(async (_body: Json) => COMPLETED);
-  await runProgram(["research", "-", "--json"], stubClient({ research }), {
+  await runProgram(["research", "-", "--json"], clientHost({ research }), {
     stdin: "  from stdin \n",
   });
   expect(research).toHaveBeenCalledWith({ input: "from stdin" });
-  expect(await runProgram(["research", "-"], stubClient({ research }), { stdin: " " })).toBe(2);
+  expect(await runProgram(["research", "-"], clientHost({ research }), { stdin: " " })).toBe(2);
   expect(io.stderr()).toContain("QUERY is required");
   // stdin is capped at 100,000 characters.
-  await runProgram(["research", "-", "--json"], stubClient({ research }), {
+  await runProgram(["research", "-", "--json"], clientHost({ research }), {
     stdin: "x".repeat(200_000),
   });
   expect(research).toHaveBeenLastCalledWith({ input: "x".repeat(100_000) });
@@ -199,10 +199,10 @@ test("query from stdin; an empty query is a usage error", async () => {
 
 test("`research status` with no id researches the word status", async () => {
   const research = vi.fn(async (_body: Json) => COMPLETED);
-  await runProgram(["--json", "research", "status"], stubClient({ research }));
+  await runProgram(["--json", "research", "status"], clientHost({ research }));
   expect(research).toHaveBeenCalledWith({ input: "status" });
   // A leading option skips the rewrite; commander's default command still routes to run.
-  await runProgram(["research", "--json", "q"], stubClient({ research }));
+  await runProgram(["research", "--json", "q"], clientHost({ research }));
   expect(research).toHaveBeenLastCalledWith({ input: "q" });
 });
 
@@ -228,12 +228,12 @@ test("stream human mode shows steps on stderr and renders the report", async () 
 
 test("status --json prints the response; human status shows request, status, and hints", async () => {
   const getResearch = vi.fn(async (_id: string) => ({ status: "completed", content: "x" }));
-  await runProgram(["research", "status", "abc", "--json"], stubClient({ getResearch }));
+  await runProgram(["research", "status", "abc", "--json"], clientHost({ getResearch }));
   expect(getResearch).toHaveBeenCalledWith("abc");
   expect(io.stdout()).toBe('{"status":"completed","content":"x"}\n');
 
   const failed = vi.fn(async () => ({ status: "failed", error: "bad" }));
-  await runProgram(["research", "status", "id\x1b[2J"], stubClient({ getResearch: failed }));
+  await runProgram(["research", "status", "id\x1b[2J"], clientHost({ getResearch: failed }));
   const text = visible(io.stdout());
   expect(text).toContain("  Request:  id[2J\n");
   expect(text).toContain("  Status:   failed\n");

@@ -2,8 +2,9 @@
 import type { Command } from "commander";
 import { AGENT_NAMES } from "../core/agent-names.js";
 import { installMcp, MCP_AUTH_NOTE, type McpSetupResult } from "../core/mcp-setup.js";
-import { detectAgents, type SkillsDeps } from "../core/skills.js";
+import { detectAgents } from "../core/skills.js";
 import { ExitError } from "../errors.js";
+import type { Host } from "../host.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, out } from "../ui/theme.js";
 import { resolveJson } from "./options.js";
@@ -13,20 +14,19 @@ export interface McpOptions {
   keyless?: boolean;
 }
 
-export interface McpDeps extends SkillsDeps {
-  installMcp?: typeof installMcp;
-}
-
-export async function runMcp(opts: McpOptions, cmd: Command, deps: McpDeps = {}): Promise<void> {
+export async function runMcp(
+  opts: McpOptions,
+  cmd: Command,
+  host: Pick<Host, "home" | "env" | "exec">,
+): Promise<void> {
   const json = resolveJson(cmd);
-  const { installMcp: install = installMcp, ...setupDeps } = deps;
   const requested = opts.agent ?? [];
   const agents = requested.includes("all")
     ? [...AGENT_NAMES]
     : requested.length
       ? [...new Set(requested)]
-      : detectAgents(setupDeps);
-  const result = await install(agents, { keyless: opts.keyless === true, ...setupDeps });
+      : detectAgents(host);
+  const result = await installMcp(agents, opts.keyless === true, host);
   const ok = agents.length === 0 || result.configured.length > 0;
   printMcp(result, ok, json);
   if (!ok) throw new ExitError(1);

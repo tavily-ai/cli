@@ -5,9 +5,9 @@
  * holds a reference the client expands from its own environment at runtime, so the key itself
  * is never written; otherwise the config is the URL alone and the client signs in with OAuth.
  */
-import * as childProcess from "node:child_process";
-import { failureOf, runManager, whichOnPath } from "../util/process.js";
-import { NPX_ADD_MCP_PACKAGE, runNpx, type SkillsDeps } from "./skills.js";
+import type { Host } from "../host.js";
+import type { Exec } from "../util/exec.js";
+import { NPX_ADD_MCP_PACKAGE, runNpx } from "./skills.js";
 
 export const MCP_SERVER_URL = "https://mcp.tavily.com/mcp/";
 const SERVER_NAME = "tavily";
@@ -34,15 +34,16 @@ const HEADER_REF: Record<string, string> = {
 
 export async function installMcp(
   agents: string[],
-  opts: { keyless: boolean } & SkillsDeps,
+  keyless: boolean,
+  host: Pick<Host, "env" | "exec">,
 ): Promise<McpSetupResult> {
-  const auth: McpAuth = !opts.keyless && (opts.env ?? process.env)[KEY_VAR] ? "env" : "oauth";
+  const auth: McpAuth = !keyless && host.env[KEY_VAR] ? "env" : "oauth";
   const result: McpSetupResult = { configured: [], skipped: [], auth };
   for (const agent of agents) {
     const reason =
       auth === "env" && agent === "codex"
-        ? codexAdd(opts)
-        : addMcp(agent, auth === "env" ? HEADER_REF[agent] : undefined, opts);
+        ? codexAdd(host.exec)
+        : addMcp(agent, auth === "env" ? HEADER_REF[agent] : undefined, host.exec);
     if (reason) result.skipped.push({ agent, reason });
     else result.configured.push(agent);
   }
@@ -50,7 +51,7 @@ export async function installMcp(
 }
 
 /** `npx add-mcp` for one agent: the reason it was skipped, or null. Throws without npx. */
-function addMcp(agent: string, header: string | undefined, deps: SkillsDeps): string | null {
+function addMcp(agent: string, header: string | undefined, exec: Exec): string | null {
   // --yes also keeps add-mcp from prompting for the ${...} placeholder in the header. The header
   // value holds spaces, which only Windows' .cmd fallback (no npx-cli.js) would split.
   const args = [
@@ -67,19 +68,18 @@ function addMcp(agent: string, header: string | undefined, deps: SkillsDeps): st
     "--global",
     "--yes",
   ];
-  const completed = runNpx(args, deps);
+  const completed = runNpx(args, exec);
   if (!completed) {
     throw new Error(
       "Adding the Tavily MCP server requires Node.js (npx). Install Node.js and rerun.",
     );
   }
-  return failureOf(completed);
+  return completed.failure;
 }
 
 /** `codex mcp add` reading the key from the environment at runtime. */
-function codexAdd(deps: SkillsDeps): string | null {
-  const which = deps.which ?? ((name: string) => whichOnPath(name, deps.env));
-  const codex = which("codex");
+function codexAdd(exec: Exec): string | null {
+  const codex = exec.which("codex");
   if (!codex) return "codex is not on PATH";
   const args = [
     "mcp",
@@ -90,6 +90,5 @@ function codexAdd(deps: SkillsDeps): string | null {
     "--bearer-token-env-var",
     KEY_VAR,
   ];
-  const win = (deps.platform ?? process.platform) === "win32";
-  return failureOf(runManager(deps.spawnImpl ?? childProcess.spawnSync, codex, args, win));
+  return exec.run(codex, args, { timeoutMs: 300_000 }).failure;
 }
