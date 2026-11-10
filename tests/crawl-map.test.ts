@@ -5,7 +5,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { Json } from "../src/core/tavily-client.js";
 import { setTerminalOverride } from "../src/ui/text.js";
 import { captureOutput, visible } from "./helpers/capture.js";
-import { clientFactory, runProgram, stubClient } from "./helpers/program.js";
+import { runProgram, stubClient } from "./helpers/program.js";
 
 const io = captureOutput();
 const load = (name: string) =>
@@ -25,10 +25,6 @@ test.each([
   vi.stubEnv("HOME", home);
   vi.stubEnv("USERPROFILE", home);
   vi.stubEnv("TAVILY_API_KEY", "");
-  const actual = await vi.importActual<typeof import("../src/core/client-factory.js")>(
-    "../src/core/client-factory.js",
-  );
-  clientFactory.getKeyedClient.mockImplementationOnce(actual.getKeyedClient);
   const code = await runProgram([cmd, arg], stubClient({}));
   expect(code).toBe(3);
   expect(io.stdout()).toBe("");

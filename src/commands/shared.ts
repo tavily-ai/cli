@@ -1,57 +1,7 @@
-/** Helpers shared by the API commands: API error handling, query/CSV parsing. */
+/** Helpers shared by the API commands: query/CSV parsing. */
 import { readFileSync } from "node:fs";
-import { TavilyKeylessLimitError, TavilyRequestError } from "@tavily/core";
 import type { Command } from "commander";
 import { snake } from "../core/search-flags.js";
-import { ExitError, messageOf, OAuthError } from "../errors.js";
-import { keylessCapError, printKeylessCapHit } from "../ui/keyless.js";
-import { safeLink, sanitizeControl } from "../ui/text.js";
-import { colors, err, out } from "../ui/theme.js";
-import { handleOauthRefreshError } from "./common.js";
-
-// Status codes that represent usage/plan limits rather than real errors.
-export const LIMIT_STATUSES: ReadonlySet<number> = new Set([429, 432]);
-// Rejected credentials: exit 3 like the limits, but print the API's message as a plain error.
-const AUTH_STATUSES: ReadonlySet<number> = new Set([401, 403]);
-
-export function handleApiError(e: unknown, json: boolean): never {
-  const limit = e instanceof TavilyRequestError && LIMIT_STATUSES.has(e.status);
-  const code = limit || (e instanceof TavilyRequestError && AUTH_STATUSES.has(e.status)) ? 3 : 4;
-  if (json) {
-    out(JSON.stringify({ error: messageOf(e) }));
-    throw new ExitError(code);
-  }
-  const text = sanitizeControl(messageOf(e));
-  if (limit) {
-    err();
-    err(`  ${colors.yellow(">")} ${text}`);
-    err();
-    err(
-      `  ${colors.dim("Upgrade your plan at")} ${colors.green(safeLink("https://tavily.com", "tavily.com"))}`,
-    );
-    if (e.docs) err(`  ${colors.dim("Docs:")} ${colors.dim(safeLink(e.docs))}`);
-    err();
-    throw new ExitError(3);
-  }
-  err(`  ${colors.pink("> Error:")} ${text}`);
-  throw new ExitError(code);
-}
-
-/** Run a command body, turning keyless cap, OAuth refresh, and API failures into exit codes. */
-export async function runWithApiErrors<T>(json: boolean, fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (e) {
-    if (e instanceof ExitError) throw e;
-    if (e instanceof TavilyKeylessLimitError) {
-      if (json) out(JSON.stringify({ error: keylessCapError(e) }));
-      else printKeylessCapHit(e);
-      throw new ExitError(3);
-    }
-    if (e instanceof OAuthError) return handleOauthRefreshError(e, json);
-    return handleApiError(e, json);
-  }
-}
 
 export function splitCsv(value?: string): string[] | undefined {
   return value ? value.split(",").map((part) => part.trim()) : undefined;

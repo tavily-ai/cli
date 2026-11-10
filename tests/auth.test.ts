@@ -7,7 +7,7 @@ import { configPaths, readConfig } from "../src/core/config.js";
 import type { OAuthSession } from "../src/core/oauth.js";
 import { OAuthError } from "../src/errors.js";
 import { captureOutput, visible } from "./helpers/capture.js";
-import { clientFactory, runProgram, stubClient } from "./helpers/program.js";
+import { runProgram } from "./helpers/program.js";
 
 const io = captureOutput();
 
@@ -242,14 +242,5 @@ describe("auth", () => {
     await runAuthProgram(["auth"], { home, env: {} });
     expect(visible(io.stdout())).toContain("> Not authenticated");
     expect(visible(io.stdout())).toContain("Run tvly login to authenticate.");
-  });
-});
-
-test("search --json reports refresh failure without a keyless fallback", async () => {
-  clientFactory.getClientOrKeyless.mockRejectedValueOnce(new OAuthError("network down"));
-  const code = await runProgram(["search", "query", "--json"], stubClient({}));
-  expect(code).toBe(3);
-  expect(stdoutJson()).toEqual({
-    error: { code: "oauth_refresh_failed", message: "network down" },
   });
 });

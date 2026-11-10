@@ -2,7 +2,7 @@
 import { authSource, type ConfigOptions } from "../core/config.js";
 import { colors, out } from "../ui/theme.js";
 import { VERSION } from "../version.js";
-import { getApiKeyOrExit } from "./common.js";
+import { getApiKeyOrExit } from "./credential.js";
 
 export async function printStatus(json: boolean, deps: ConfigOptions = {}): Promise<void> {
   const key = await getApiKeyOrExit(json, deps);
