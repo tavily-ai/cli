@@ -2,6 +2,7 @@
   "name": "@tavily/cli",
   "version": "0.3.0",
   "description": "Tavily CLI",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "tvly": "dist/cli.js"
@@ -44,6 +45,10 @@
   },
   "bugs": {
     "url": "https://github.com/tavily-ai/cli/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "overrides": {
     "zod": "^4.6.6"
