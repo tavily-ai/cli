@@ -71,6 +71,7 @@ test("--help lists every command and the setup hint", async () => {
     "update",
     "set-default",
     "unset-default",
+    "setup",
   ]) {
     expect(stdout).toMatch(new RegExp(`^  ${name}[ |]`, "m"));
   }
@@ -106,9 +107,9 @@ test("dist/cli.js statically reaches no SDK, axios, lockfile, or markdown chunk"
 
 test("commands that never call the API statically reach no SDK or axios chunk", () => {
   const entries = readdirSync(dist).filter((f) =>
-    /^(auth|update|defaults|status|repl)-[\w]+\.js$/.test(f),
+    /^(auth|update|defaults|status|repl|setup)-[\w]+\.js$/.test(f),
   );
-  expect(entries).toHaveLength(5);
+  expect(entries).toHaveLength(6);
   for (const entry of entries) expectStaticGraphFree(entry, SDK);
 });
 

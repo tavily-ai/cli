@@ -106,7 +106,8 @@ tvly search "latest AI trends"
 1. **Global install:** if `tvly` is not on your PATH, install it globally with the package manager that ran `init` (npm, pnpm, yarn, or bun). If the install directory is not on your PATH, `init` offers to add it to your shell profile, or prints the line to add yourself.
 2. **Authentication:** reuse an existing credential or sign in through browser OAuth.
 3. **Agent setup:** detect Claude Code, Codex, and Cursor, install the Tavily agent skills, and offer the official workflows from `tavily-ai/official-workflows`.
-4. **Verification:** check the CLI, then run a live search.
+4. **MCP server (optional):** offer to add the hosted Tavily MCP server to the detected agents. The prompt defaults to no, and non-interactive runs (`--yes`, `--json`, no TTY) skip it; `tvly setup mcp` adds it later.
+5. **Verification:** check the CLI, then run a live search.
 
 Skills are installed with the [skills.sh CLI](https://skills.sh)
 (`npx skills add tavily-ai/skills`), and the workflows the same way
@@ -345,6 +346,8 @@ tvly
 ├── update                      # Check for or install CLI updates
 ├── set-default                 # Disable built-in web search in Claude Code/Codex
 ├── unset-default               # Restore built-in web search in Claude Code/Codex
+├── setup
+│   └── mcp                     # Add the hosted Tavily MCP server to Claude Code/Codex/Cursor
 ├── research <query>            # Deep research (async)
 │   ├── run <query>             # Start a research task (same as above)
 │   ├── status <id>             # Check task status
@@ -368,9 +371,10 @@ tvly init --agent codex --skip-auth --yes --json
 tvly init --skip-auth --skip-skills --json
 ```
 
-Setup JSON includes `ok`, `mode`, `install`, `auth`, `skills`, `workflows`, and `verification`. On
-failure, `error.stage` identifies the failed step. Setup always performs a
-live search, so it needs network access even with `--skip-skills`.
+Setup JSON includes `ok`, `mode`, `install`, `auth`, `skills`, `workflows`, `mcp`, and
+`verification`. On failure, `error.stage` identifies the failed step. Setup always performs a
+live search, so it needs network access even with `--skip-skills`. Non-interactive setup never
+configures the MCP server, so `mcp` is `{ "agents": [], "skipped": true }`; use `tvly setup mcp`.
 
 ```bash
 # Every command supports --json for structured output
@@ -429,6 +433,44 @@ Use either `--all` or `--agent`. `--skip-auth` and `--api-key` cannot be
 combined. `--json` is a global flag accepted by every command; with `tvly init`
 it returns structured setup and verification results and selects detected
 agents without prompting, but does not skip authentication.
+
+### `tvly setup mcp`
+
+Add the hosted Tavily MCP server (`https://mcp.tavily.com/mcp/`, named `tavily`)
+to Claude Code, Codex, and Cursor. The config always points at the hosted
+server; nothing runs locally. Claude Code and Cursor are written through
+`npx add-mcp`, Codex through `codex mcp add` when a key is used.
+
+```bash
+# Every detected agent
+tvly setup mcp
+
+# One or more agents, or all three
+tvly setup mcp --agent codex
+tvly setup mcp --agent claude-code --agent cursor
+tvly setup mcp --agent all
+```
+
+| Option | Description |
+|--------|-------------|
+| `--agent` | Configure `claude-code`, `codex`, `cursor`, or `all`; repeat to select more than one. Without it, the detected agents |
+| `--keyless` | Write the URL-only config so the agent signs in with OAuth, even when `TAVILY_API_KEY` is set |
+
+Two ways to authenticate, chosen from your environment:
+
+- **`TAVILY_API_KEY` exported:** the config holds a reference the agent expands
+  at runtime (`Bearer ${TAVILY_API_KEY}` for Claude Code,
+  `Bearer ${env:TAVILY_API_KEY}` for Cursor, `--bearer-token-env-var` for Codex).
+  The key itself is never stored in any agent config.
+- **No key, or `--keyless`:** the config holds the URL alone. The agent opens a
+  browser to sign in to Tavily the first time it uses the server.
+
+A key stored only by `tvly login` is not used for MCP; the agent reads the
+key from its own environment or signs in with OAuth. Agents that cannot be
+configured on this machine (for example Codex when `codex` is not on PATH)
+are skipped and listed; the command exits 1 only when nothing was configured.
+`--json` prints `ok`, `configured`, `skipped` (with reasons), and `auth`
+(`env` or `oauth`). Restart the agent after adding the server.
 
 ### `tvly search`
 
