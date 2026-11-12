@@ -49,9 +49,9 @@ export function detectAgents(host: Pick<Host, "home" | "env">): AgentName[] {
 }
 
 /** Run npx with `args` (5-minute timeout). Null when npx is not on PATH. */
-export function runNpx(args: string[], exec: Exec): ExecResult | null {
+export async function runNpx(args: string[], exec: Exec): Promise<ExecResult | null> {
   const npx = exec.which("npx");
-  return npx ? exec.run(npx, args, { timeoutMs: 300_000 }) : null;
+  return npx ? exec.runAsync(npx, args, { timeoutMs: 300_000 }) : null;
 }
 
 /** Install every skill in a skills repo (Tavily skills or workflows) for the selected agents. */
@@ -83,7 +83,7 @@ export async function installAgentSkills(
     ...agents,
     "--yes",
   ];
-  const completed = runNpx(args, host.exec);
+  const completed = await runNpx(args, host.exec);
   if (!completed) {
     throw new Error(
       "Installing Tavily skills requires Node.js (npx). Install Node.js, or rerun with --skip-skills.",

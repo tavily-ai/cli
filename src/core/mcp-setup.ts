@@ -42,8 +42,8 @@ export async function installMcp(
   for (const agent of agents) {
     const reason =
       auth === "env" && agent === "codex"
-        ? codexAdd(host.exec)
-        : addMcp(agent, auth === "env" ? HEADER_REF[agent] : undefined, host.exec);
+        ? await codexAdd(host.exec)
+        : await addMcp(agent, auth === "env" ? HEADER_REF[agent] : undefined, host.exec);
     if (reason) result.skipped.push({ agent, reason });
     else result.configured.push(agent);
   }
@@ -51,7 +51,11 @@ export async function installMcp(
 }
 
 /** `npx add-mcp` for one agent: the reason it was skipped, or null. Throws without npx. */
-function addMcp(agent: string, header: string | undefined, exec: Exec): string | null {
+async function addMcp(
+  agent: string,
+  header: string | undefined,
+  exec: Exec,
+): Promise<string | null> {
   // --yes also keeps add-mcp from prompting for the ${...} placeholder in the header. The header
   // value holds spaces, which only Windows' .cmd fallback (no npx-cli.js) would split.
   const args = [
@@ -68,7 +72,7 @@ function addMcp(agent: string, header: string | undefined, exec: Exec): string |
     "--global",
     "--yes",
   ];
-  const completed = runNpx(args, exec);
+  const completed = await runNpx(args, exec);
   if (!completed) {
     throw new Error(
       "Adding the Tavily MCP server requires Node.js (npx). Install Node.js and rerun.",
@@ -78,7 +82,7 @@ function addMcp(agent: string, header: string | undefined, exec: Exec): string |
 }
 
 /** `codex mcp add` reading the key from the environment at runtime. */
-function codexAdd(exec: Exec): string | null {
+async function codexAdd(exec: Exec): Promise<string | null> {
   const codex = exec.which("codex");
   if (!codex) return "codex is not on PATH";
   const args = [
@@ -90,5 +94,5 @@ function codexAdd(exec: Exec): string | null {
     "--bearer-token-env-var",
     KEY_VAR,
   ];
-  return exec.run(codex, args, { timeoutMs: 300_000 }).failure;
+  return (await exec.runAsync(codex, args, { timeoutMs: 300_000 })).failure;
 }
