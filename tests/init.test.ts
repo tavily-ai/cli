@@ -166,7 +166,7 @@ describe("init pickers", () => {
     const select = vi.fn(
       async (message: string, _choices: unknown, initial?: string) => answers[message] ?? initial,
     );
-    const password = vi.fn(async () => "tvly-abc");
+    const password = vi.fn(async () => "  tvly-abc \n");
     const prompt = {
       ...fakeHost().prompt,
       multiselect,
@@ -257,7 +257,7 @@ describe("init pickers", () => {
     );
   });
 
-  test("sign-in select: paste a key saves it", async () => {
+  test("sign-in select: paste a key saves it trimmed", async () => {
     const { host } = setup(
       { agents: [], answers: { "How do you want to sign in?": "key" } },
       { env: {} },

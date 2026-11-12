@@ -316,7 +316,7 @@ async function ensureAuth(
       "browser",
     );
     if (method === "key") {
-      await saveApiKey(await host.prompt.password("API key"), host);
+      await saveApiKey((await host.prompt.password("API key")).trim(), host);
       return { authenticated: true, method: "api_key" };
     }
     if (method === "keyless") return { authenticated: false, method: "none" };

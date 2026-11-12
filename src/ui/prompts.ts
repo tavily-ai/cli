@@ -51,5 +51,12 @@ export const clackPrompter: Prompter = {
         output,
       }),
     ),
-  password: async (message) => answered(await clack.password({ message, output })),
+  password: async (message) =>
+    answered(
+      await clack.password({
+        message,
+        validate: (value) => (value?.trim() ? undefined : "Enter a key"),
+        output,
+      }),
+    ).trim(),
 };
