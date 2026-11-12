@@ -42,6 +42,8 @@ export async function invoke<T>(
       : await withSpinner(label, !json, () => fn(client));
   } catch (e) {
     if (e instanceof ExitError) throw e;
+    // Also a TavilyRequestError, so this stays first. `e.status` is available (401/403/404/503
+    // envelopes share this shape) but every envelope still exits 3 with the cap message.
     if (e instanceof TavilyKeylessLimitError) {
       if (json) out(JSON.stringify({ error: keylessCapError(e) }));
       else printKeylessCapHit(e);
@@ -84,7 +86,6 @@ function handleApiError(e: unknown, json: boolean): never {
     err(
       `  ${colors.dim("Upgrade your plan at")} ${colors.green(safeLink("https://tavily.com", "tavily.com"))}`,
     );
-    if (e.docs) err(`  ${colors.dim("Docs:")} ${colors.dim(safeLink(e.docs))}`);
     err();
     throw new ExitError(3);
   }

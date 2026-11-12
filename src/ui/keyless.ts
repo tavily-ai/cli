@@ -22,8 +22,6 @@ export function formatSeconds(seconds: number): string {
   return h ? `${d}d ${h}h` : `${d}d`;
 }
 
-type Action = Record<string, unknown>;
-
 /** Python truthiness for the `or` defaults the envelope fields use. */
 const orDefault = (value: unknown, fallback: string): string => (value ? String(value) : fallback);
 
@@ -69,17 +67,16 @@ export function formatKeylessEnvelopeForTerminal(
 
   // The SDK passes the envelope's entries through unchecked, so non-objects are skipped.
   const actions = (e.continuationPaths as unknown[]).filter(isObject);
-  const last = (type: string, accept: (a: Action) => boolean = () => true) =>
-    [...actions].reverse().find((a) => a.type === type && accept(a));
+  const last = (type: string) => [...actions].reverse().find((a) => a.type === type);
   const signup = last("signup");
   const payment = last("agentic_payment");
-  const bonus = last("bonus_credits", (a) => Boolean(a.eligible));
+  const bonus = last("bonus_credits");
 
   if (signup || payment || bonus) {
     lines.push("", "Continuation options:");
     if (signup) {
       lines.push(
-        `  - Sign up for a Tavily API key:  ${orDefault(signup.resource ?? signup.url, "https://tavily.com")}`,
+        `  - Sign up for a Tavily API key:  ${orDefault(signup.resource, "https://tavily.com")}`,
       );
       if (signup.instruction) lines.push(`      ${signup.instruction}`);
     }
@@ -90,9 +87,10 @@ export function formatKeylessEnvelopeForTerminal(
       if (payment.instruction) lines.push(`      ${payment.instruction}`);
     }
     if (bonus) {
-      const questions = Array.isArray(bonus.questions) ? bonus.questions : [];
+      const params = isObject(bonus.params) ? bonus.params : {};
+      const questions = Array.isArray(params.questions) ? params.questions : [];
       if (questions.length > 0) {
-        const credits = bonus.credits_on_completion;
+        const credits = params.credits_on_completion;
         const noun = `${questions.length} question${questions.length !== 1 ? "s" : ""}`;
         lines.push(
           typeof credits === "number" && Number.isInteger(credits)

@@ -35,10 +35,12 @@ function exitCode(fn: () => unknown): number {
 const capError = () =>
   new TavilyKeylessLimitError({
     message: "Daily cap",
+    status: 429,
+    body: {},
     capType: "daily",
     retryAfter: 3600,
     bonusEligible: false,
-    continuationPaths: [{ type: "signup", url: "https://tavily.com/signup" }],
+    continuationPaths: [{ type: "signup", resource: "https://tavily.com/signup" }],
     window: "day",
   });
 
@@ -56,7 +58,7 @@ test("keylessCapError maps SDK fields, including window, in the Python key order
     message: "Daily cap",
     window: "day",
     retry_after_seconds: 3600,
-    next_actions: [{ type: "signup", url: "https://tavily.com/signup" }],
+    next_actions: [{ type: "signup", resource: "https://tavily.com/signup" }],
   });
 });
 
@@ -126,6 +128,8 @@ describe("keyless cap rendering", () => {
   }) =>
     new TavilyKeylessLimitError({
       message: "",
+      status: 429,
+      body: {},
       capType: "hourly",
       retryAfter: null,
       bonusEligible: false,
@@ -149,14 +153,16 @@ describe("keyless cap rendering", () => {
         message: "  Hourly cap reached.  ",
         retryAfter: 90,
         continuationPaths: [
-          { type: "signup", url: "https://app.tavily.com" },
+          { type: "signup", resource: "https://app.tavily.com" },
           { type: "agentic_payment", scheme: "x402", details: "pay here" },
           {
             type: "bonus_credits",
-            eligible: true,
-            credits_on_completion: 50,
-            questions: ["Who are you?", "What do you build?"],
-            endpoint: "/v1/keyless/bonus",
+            resource: "/v1/keyless/bonus",
+            instruction: "Answer the questions.",
+            params: {
+              questions: ["Who are you?", "What do you build?"],
+              credits_on_completion: 50,
+            },
           },
         ],
       }),
@@ -177,7 +183,7 @@ describe("keyless cap rendering", () => {
     ]);
   });
 
-  test("envelope defaults, ineligible bonus, and empty input", () => {
+  test("envelope defaults, bonus without questions, and empty input", () => {
     expect(formatKeylessEnvelopeForTerminal(capHit({}))).toBe("Tavily rate limit reached.");
     const block = formatKeylessEnvelopeForTerminal(
       capHit({
@@ -185,7 +191,7 @@ describe("keyless cap rendering", () => {
         continuationPaths: [
           { type: "signup" },
           { type: "agentic_payment" },
-          { type: "bonus_credits", eligible: false, questions: ["q"] },
+          { type: "bonus_credits", params: {} },
           // The SDK passes envelope entries through unchecked.
           "junk" as unknown as TavilyContinuationPath,
         ],
@@ -200,7 +206,7 @@ describe("keyless cap rendering", () => {
     ]);
     const bonus = formatKeylessEnvelopeForTerminal(
       capHit({
-        continuationPaths: [{ type: "bonus_credits", eligible: true, questions: ["only"] }],
+        continuationPaths: [{ type: "bonus_credits", params: { questions: ["only"] } }],
       }),
     );
     expect(bonus).toContain("  - Earn bonus credits by answering 1 question:");
@@ -209,28 +215,31 @@ describe("keyless cap rendering", () => {
 
   test("production envelope renders each resource and instruction", () => {
     const block = formatKeylessEnvelopeForTerminal(
-      keylessLimitErrorFromEnvelope({
-        error: {
-          code: "daily_cap_reached",
-          message: "...",
-          window: "day",
-          retry_after_seconds: 480,
-          next_actions: [
-            {
-              type: "agentic_payment",
-              resource: "https://docs.tavily.com/documentation/machine-payments/x402",
-              instruction:
-                "Pay for this request using the x402 agentic payment protocol to continue immediately.",
-            },
-            {
-              type: "signup",
-              resource: "https://tavily.com",
-              instruction:
-                "Ask the user to sign up at tavily.com and retry with the API key in the Authorization header as: Bearer tvly-YOUR_API_KEY",
-            },
-          ],
+      keylessLimitErrorFromEnvelope(
+        {
+          error: {
+            code: "daily_cap_reached",
+            message: "...",
+            window: "day",
+            retry_after_seconds: 480,
+            next_actions: [
+              {
+                type: "agentic_payment",
+                resource: "https://docs.tavily.com/documentation/machine-payments/x402",
+                instruction:
+                  "Pay for this request using the x402 agentic payment protocol to continue immediately.",
+              },
+              {
+                type: "signup",
+                resource: "https://tavily.com",
+                instruction:
+                  "Ask the user to sign up at tavily.com and retry with the API key in the Authorization header as: Bearer tvly-YOUR_API_KEY",
+              },
+            ],
+          },
         },
-      }),
+        429,
+      ),
     );
     expect(block.split("\n").slice(-5)).toEqual([
       "Continuation options:",

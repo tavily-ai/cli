@@ -23,10 +23,12 @@ const fixture = JSON.parse(
 const capError = () =>
   new TavilyKeylessLimitError({
     message: "Keyless limit reached",
+    status: 429,
+    body: {},
     capType: "keyless_cap",
     retryAfter: 60,
     bonusEligible: false,
-    continuationPaths: [{ type: "signup", url: "https://tavily.com/signup" }],
+    continuationPaths: [{ type: "signup", resource: "https://tavily.com/signup" }],
   });
 
 /** Port of test_output.py's FakeClient: one result titled `T <query>`. */
@@ -92,7 +94,7 @@ test("a keyless cap hit exits 3 with the JSON envelope", async () => {
       message: "Keyless limit reached",
       window: null,
       retry_after_seconds: 60,
-      next_actions: [{ type: "signup", url: "https://tavily.com/signup" }],
+      next_actions: [{ type: "signup", resource: "https://tavily.com/signup" }],
     },
   });
 });
@@ -114,7 +116,6 @@ test.each([429, 432])("a usage limit (%i) prints the upgrade block and exits 3",
         status,
         body: null,
         message: "Plan limit",
-        docs: "https://d/x",
       });
     },
   });
@@ -125,7 +126,6 @@ test.each([429, 432])("a usage limit (%i) prints the upgrade block and exits 3",
     "  > Plan limit",
     "",
     "  Upgrade your plan at tavily.com",
-    "  Docs: https://d/x",
     "",
     "",
   ]);
@@ -200,7 +200,7 @@ test("multi-query keeps keyless cap details", async () => {
   expect(list[1]?.error?.code).toBe("keyless_cap");
   expect(list[1]?.error?.retry_after_seconds).toBe(60);
   expect(list[1]?.error?.next_actions).toEqual([
-    { type: "signup", url: "https://tavily.com/signup" },
+    { type: "signup", resource: "https://tavily.com/signup" },
   ]);
 });
 
