@@ -84,7 +84,6 @@ function handleApiError(e: unknown, json: boolean): never {
     err(
       `  ${colors.dim("Upgrade your plan at")} ${colors.green(safeLink("https://tavily.com", "tavily.com"))}`,
     );
-    if (e.docs) err(`  ${colors.dim("Docs:")} ${colors.dim(safeLink(e.docs))}`);
     err();
     throw new ExitError(3);
   }

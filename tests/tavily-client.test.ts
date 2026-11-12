@@ -8,13 +8,13 @@ type Call = { method: string; endpoint: string; body?: unknown; opts?: unknown }
 function stub(): { transport: TavilyTransport; calls: Call[] } {
   const calls: Call[] = [];
   const transport: TavilyTransport = {
-    post: async (endpoint, body, opts) => {
+    post: async <T>(endpoint: string, body: Record<string, unknown>, opts?: unknown) => {
       calls.push({ method: "post", endpoint, body, opts });
-      return { ok: true };
+      return { ok: true } as T;
     },
-    get: async (endpoint, opts) => {
+    get: async <T>(endpoint: string, opts?: unknown) => {
       calls.push({ method: "get", endpoint, opts });
-      return { ok: true };
+      return { ok: true } as T;
     },
     stream: async (endpoint, body, opts) => {
       calls.push({ method: "stream", endpoint, body, opts });

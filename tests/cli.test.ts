@@ -26,6 +26,13 @@ test("unknown command exits 2", async () => {
   expect((await runCli(["bogus"])).code).toBe(2);
 });
 
+// `tvly research --help | head -1`: the reader closing the pipe is not an error.
+test.skipIf(process.platform === "win32")("a closed stdout pipe exits 0 quietly", async () => {
+  const { code, stderr } = await runCli(["research", "--help"], { closeStdout: true });
+  expect(code).toBe(0);
+  expect(stderr).toBe("");
+});
+
 // One real spawn proves the colour policy is wired into piped output; colorEnabled below covers
 // FORCE_COLOR and NO_COLOR in-process.
 test("--status piped under CI has no color", async () => {

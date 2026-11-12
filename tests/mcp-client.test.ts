@@ -92,13 +92,13 @@ test("bare result is returned when no content", async () => {
 
 test("an error in the parsed result throws TavilyRequestError", async () => {
   const body = sse({
-    result: { structuredContent: { error: "bad", status: 429, documentation: "http://docs" } },
+    result: { structuredContent: { error: "bad", status: 429 } },
   });
   const err = await make(body)
     .c.search({})
     .catch((e: unknown) => e);
   expect(err).toBeInstanceOf(TavilyRequestError);
-  expect(err).toMatchObject({ message: "bad", status: 429, docs: "http://docs" });
+  expect(err).toMatchObject({ message: "bad", status: 429 });
 });
 
 test("detail.error wins over error and status defaults to 0", async () => {

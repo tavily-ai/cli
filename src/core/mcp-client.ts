@@ -29,12 +29,10 @@ function raiseIfApiError(parsed: unknown, isError: boolean): void {
   const detail = parsed.detail;
   const message =
     isObject(detail) && typeof detail.error === "string" ? detail.error : String(parsed.error);
-  const docs = typeof parsed.documentation === "string" ? parsed.documentation : undefined;
   throw new TavilyRequestError({
     status: typeof parsed.status === "number" ? parsed.status : 0,
     body: parsed,
     message,
-    ...(docs ? { docs } : {}),
   });
 }
 
