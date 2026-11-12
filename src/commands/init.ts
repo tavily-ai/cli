@@ -58,7 +58,7 @@ export async function run(
   if (opts.skipAuth && opts.apiKey) {
     cmd.error("error: Use either --skip-auth or --api-key, not both.");
   }
-  const interactive = host.stdinIsTTY && !json && !opts.yes;
+  const interactive = host.stdinIsTTY && host.stderrIsTTY && !json && !opts.yes;
   if (interactive) intro("tvly init", { output });
 
   const cli = await installStep(opts, json, host);
@@ -224,7 +224,7 @@ async function installStep(opts: InitOptions, json: boolean, host: Host): Promis
   };
   if (opts.skipInstall || step.install.on_path) return step;
 
-  const interactive = !json && !opts.yes && host.stdinIsTTY;
+  const interactive = !json && !opts.yes && host.stdinIsTTY && host.stderrIsTTY;
   if (interactive && !(await host.prompt.confirm("Install tvly globally?"))) return step;
 
   const manager = detectPackageManager(host);

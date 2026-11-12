@@ -174,7 +174,7 @@ describe("init pickers", () => {
       password,
     } as unknown as Host["prompt"];
     const exec = fakeExec(opts.run ? { run: opts.run } : {});
-    const host = initHost({ stdinIsTTY: true, prompt, exec, ...over });
+    const host = initHost({ stdinIsTTY: true, stderrIsTTY: true, prompt, exec, ...over });
     for (const dir of opts.agents ?? [".claude", ".codex"]) mkdirSync(join(host.home, dir));
     return { host, exec, multiselect, select };
   }
@@ -204,8 +204,11 @@ describe("init pickers", () => {
     expectDefaults(exec);
   });
 
-  test("a non-TTY run takes the same defaults", async () => {
-    const { host, exec, multiselect, select } = setup({}, { stdinIsTTY: false });
+  test.each([
+    ["stdin", { stdinIsTTY: false }],
+    ["stderr", { stderrIsTTY: false }],
+  ])("a run whose %s is not a TTY takes the same defaults", async (_name, tty) => {
+    const { host, exec, multiselect, select } = setup({}, tty);
     expect(await runInit([], host)).toBe(0);
     expect(multiselect).not.toHaveBeenCalled();
     expect(select).not.toHaveBeenCalled();
@@ -358,6 +361,7 @@ describe("init global install", () => {
       platform: "darwin",
       exec,
       stdinIsTTY: opts.tty ?? true,
+      stderrIsTTY: opts.tty ?? true,
       prompt: { ...fakeHost().prompt, confirm },
     });
     return { host, confirm, exec };
