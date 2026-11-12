@@ -135,7 +135,7 @@ async function installStep(opts: InitOptions, json: boolean, host: Host): Promis
   if (opts.skipInstall || step.install.on_path) return step;
 
   const interactive = !json && !opts.yes && host.stdinIsTTY;
-  if (interactive && !(await host.confirm("Install tvly globally?"))) return step;
+  if (interactive && !(await host.prompt.confirm("Install tvly globally?"))) return step;
 
   const manager = detectPackageManager(host);
   step.install.manager = manager;
@@ -185,7 +185,7 @@ async function fixPath(
     const rc = rcFileForShell(host.env.SHELL ?? "", host.platform);
     const line = rc.includes("fish") ? `fish_add_path ${bin}` : `export PATH="${bin}:$PATH"`;
     const question = `Add ${bin} to PATH in ${rc}?`;
-    if (interactive && (await host.confirm(question))) {
+    if (interactive && (await host.prompt.confirm(question))) {
       const file = path.join(host.home, rc.slice(2));
       if (!existsSync(file) || !readFileSync(file, "utf8").includes(line)) {
         mkdirSync(path.dirname(file), { recursive: true });
@@ -216,15 +216,18 @@ async function selectAgents(
   const skills =
     !opts.skipSkills &&
     (!ask ||
-      (await host.confirm(`Install Tavily skills for detected agents (${agents.join(", ")})?`)));
+      (await host.prompt.confirm(
+        `Install Tavily skills for detected agents (${agents.join(", ")})?`,
+      )));
   const workflows =
     !opts.skipSkills &&
     !opts.skipWorkflows &&
-    (!ask || (await host.confirm(`Install the Tavily official workflows (${WORKFLOWS_REPO})?`)));
+    (!ask ||
+      (await host.prompt.confirm(`Install the Tavily official workflows (${WORKFLOWS_REPO})?`)));
   // MCP is opt-in: only an explicit yes at the prompt configures it.
   const mcp =
     interactive &&
-    (await host.confirm(
+    (await host.prompt.confirm(
       `Add the Tavily MCP server to ${agents.join(", ")} (hosted, signs in with OAuth)?`,
       false,
     ));

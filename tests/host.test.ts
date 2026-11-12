@@ -1,6 +1,6 @@
 import type { spawn } from "node:child_process";
 import { describe, expect, test, vi } from "vitest";
-import { openBrowser } from "../src/host.js";
+import { openBrowser, realHost } from "../src/host.js";
 
 describe("openBrowser", () => {
   test.each([
@@ -13,5 +13,14 @@ describe("openBrowser", () => {
     openBrowser("https://x/y", platform, spawnImpl);
     expect(spawnImpl).toHaveBeenCalledWith(cmd, args, { detached: true, stdio: "ignore" });
     expect(unref).toHaveBeenCalled();
+  });
+});
+
+describe("realHost", () => {
+  test("prompts through a Prompter with all four questions", () => {
+    const { prompt } = realHost();
+    for (const method of ["confirm", "select", "multiselect", "password"] as const) {
+      expect(typeof prompt[method]).toBe("function");
+    }
   });
 });

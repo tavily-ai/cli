@@ -22,6 +22,7 @@
     "prepublishOnly": "npm run check:publishable && npm run lint && npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
+    "@clack/prompts": "^1.9.0",
     "@tavily/core": "^1.1.0",
     "commander": "15.1.0",
     "marked": "18.1.3",

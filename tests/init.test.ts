@@ -9,7 +9,7 @@ import { SKILLS_REPO, WORKFLOWS_REPO } from "../src/core/skills.js";
 import type { Host } from "../src/host.js";
 import { captureOutput } from "./helpers/capture.js";
 import { type ExecScript, type FakeExec, fakeExec } from "./helpers/exec.js";
-import { clientHost, runProgram } from "./helpers/program.js";
+import { clientHost, fakeHost, runProgram } from "./helpers/program.js";
 
 const io = captureOutput();
 
@@ -164,7 +164,7 @@ describe("init workflows", () => {
           : (answers.skills ?? true),
     );
     const exec = fakeExec(run ? { run } : {});
-    const host = initHost({ stdinIsTTY: true, confirm, exec });
+    const host = initHost({ stdinIsTTY: true, prompt: { ...fakeHost().prompt, confirm }, exec });
     mkdirSync(join(host.home, ".codex"));
     return { host, confirm, exec };
   }
@@ -239,7 +239,7 @@ describe("init mcp", () => {
   function setup(answer: boolean) {
     const confirm = vi.fn(async (question: string) => question === MCP_QUESTION && answer);
     const exec = fakeExec();
-    const host = initHost({ stdinIsTTY: true, confirm, exec });
+    const host = initHost({ stdinIsTTY: true, prompt: { ...fakeHost().prompt, confirm }, exec });
     mkdirSync(join(host.home, ".codex"));
     return { host, confirm, exec };
   }
@@ -301,7 +301,7 @@ describe("init global install", () => {
       platform: "darwin",
       exec,
       stdinIsTTY: opts.tty ?? true,
-      confirm,
+      prompt: { ...fakeHost().prompt, confirm },
     });
     return { host, confirm, exec };
   }
