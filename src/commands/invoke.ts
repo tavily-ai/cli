@@ -42,8 +42,6 @@ export async function invoke<T>(
       : await withSpinner(label, !json, () => fn(client));
   } catch (e) {
     if (e instanceof ExitError) throw e;
-    // Also a TavilyRequestError, so this stays first. `e.status` is available (401/403/404/503
-    // envelopes share this shape) but every envelope still exits 3 with the cap message.
     if (e instanceof TavilyKeylessLimitError) {
       if (json) out(JSON.stringify({ error: keylessCapError(e) }));
       else printKeylessCapHit(e);
