@@ -185,7 +185,7 @@ async function plan(
   const agents =
     interactive && !requested.length
       ? await host.prompt.multiselect(
-          "Set up which agents?",
+          "Which agents do you want to install to?",
           candidates.map((a) => ({ value: a, label: a })),
           candidates,
         )

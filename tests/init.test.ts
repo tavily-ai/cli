@@ -151,7 +151,7 @@ describe("init", () => {
 });
 
 describe("init pickers", () => {
-  const AGENTS_QUESTION = "Set up which agents?";
+  const AGENTS_QUESTION = "Which agents do you want to install to?";
   const INSTALL_QUESTION = "What should I install?";
 
   /** A TTY host whose pickers answer from `answers` by message, else take the pre-checked default. */

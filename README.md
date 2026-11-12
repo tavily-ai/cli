@@ -105,7 +105,7 @@ tvly search "latest AI trends"
 
 1. **Global install:** if `tvly` is not on your PATH, install it globally with the package manager that ran `init` (npm, pnpm, yarn, or bun). If the install directory is not on your PATH, `init` offers to add it to your shell profile, or prints the line to add yourself.
 2. **How do you want to sign in?** Reuse an existing credential, or pick browser login (the default), paste an API key, or continue without a key (rate-limited).
-3. **Set up which agents?** Every detected agent (Claude Code, Codex, Cursor) is pre-checked; press Enter to accept. `--agent` picks the agents and skips this question.
+3. **Which agents do you want to install to?** Every detected agent (Claude Code, Codex, Cursor) is pre-checked; press Enter to accept. `--agent` picks the agents and skips this question.
 4. **What should I install?** Tavily skills and the hosted Tavily MCP server are checked; the official workflows from `tavily-ai/official-workflows` are not. `tvly setup mcp` adds the MCP server later.
 5. **Verification:** check the CLI, then run a live search.
 
