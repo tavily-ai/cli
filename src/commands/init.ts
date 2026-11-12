@@ -1,7 +1,7 @@
 /** tvly init — install tvly globally, authenticate, install Tavily skills and workflows, and verify. */
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { intro, log, outro, spinner } from "@clack/prompts";
+import { intro, log, outro } from "@clack/prompts";
 import type { Command } from "commander";
 import { authMethod, getApiKey, saveApiKey, saveOauthSession } from "../core/config.js";
 import {
@@ -17,6 +17,7 @@ import { detectAgents, installAgentSkills, SKILLS_REPO, WORKFLOWS_REPO } from ".
 import { ExitError, messageOf } from "../errors.js";
 import type { Host } from "../host.js";
 import type { Choice } from "../ui/prompts.js";
+import { withSpinner } from "../ui/spinner.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
 import { VERSION } from "../version.js";
@@ -140,24 +141,20 @@ const BUNDLES: Record<Bundle, Choice<Bundle>> = {
   mcp: { value: "mcp", label: "MCP server", hint: "hosted, signs in with OAuth" },
 };
 
-/** Run `fn` under a spinner when interactive: `label` while it runs, `done` or the error after. */
+/**
+ * Run `fn` under a spinner when interactive: `label` while it runs, `done` after. The CLI's own
+ * spinner redraws one line in place; clack's erases to the end of the screen on every frame,
+ * which flickers. A failure is reported once, by the summary.
+ */
 async function step<T>(
   interactive: boolean,
   label: string,
   done: string,
   fn: () => Promise<T>,
 ): Promise<T> {
-  if (!interactive) return fn();
-  const s = spinner({ output });
-  s.start(label);
-  try {
-    const value = await fn();
-    s.stop(done);
-    return value;
-  } catch (e) {
-    s.error(messageOf(e));
-    throw e;
-  }
+  const value = await withSpinner(label, interactive, fn);
+  if (interactive) log.success(done, { output });
+  return value;
 }
 
 /**
