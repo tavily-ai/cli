@@ -301,9 +301,20 @@ describe("init pickers", () => {
     expect(io.stdout()).toContain("Setup failed: npx skills failed: boom");
   });
 
-  test("MCP uses the environment key for codex, even with --skip-skills", async () => {
-    const { host, exec } = setup({ agents: [".codex"] }, { stdinIsTTY: false });
-    expect(await runInit(["--skip-skills", "--json"], host)).toBe(0);
+  test("--skip-skills leaves agents alone: no skills, workflows, or MCP", async () => {
+    const { host, exec } = setup({ agents: [".claude"] });
+    expect(await runInit(["--skip-skills", "--yes", "--json"], host)).toBe(0);
+    expect(exec.calls).toEqual([]);
+    expect(stdoutJson()).toMatchObject({
+      skills: { skipped: true },
+      workflows: { skipped: true },
+      mcp: { agents: [], skipped: true },
+    });
+  });
+
+  test("MCP uses the environment key for codex", async () => {
+    const { host, exec } = setup({ agents: [".codex"], answers: { [INSTALL_QUESTION]: ["mcp"] } });
+    expect(await runInit([], host)).toBe(0);
     expect(exec.calls).toEqual([
       {
         bin: "/usr/bin/codex",
@@ -319,7 +330,7 @@ describe("init pickers", () => {
         opts: { timeoutMs: 300_000 },
       },
     ]);
-    expect(stdoutJson().mcp).toEqual({ agents: ["codex"], skipped: false });
+    expect(io.stdout()).toContain("Tavily MCP server ready for codex");
   });
 });
 

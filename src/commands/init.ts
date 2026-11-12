@@ -163,6 +163,7 @@ async function step<T>(
 /**
  * Which agents get which bundles. Defaults (taken by --yes, non-TTY runs, and pre-checked in the
  * pickers): every detected agent, or the --agent list; skills and MCP, not workflows.
+ * --skip-skills leaves coding agents alone entirely: no skills, workflows, or MCP.
  */
 async function plan(
   requested: string[],
@@ -171,6 +172,7 @@ async function plan(
   host: Host,
 ): Promise<{ agents: string[]; skills: boolean; workflows: boolean; mcp: boolean }> {
   const none = { agents: [], skills: false, workflows: false, mcp: false };
+  if (opts.skipSkills) return none;
   const candidates = requested.length ? requested : detectAgents(host);
   if (!candidates.length) {
     if (interactive) {
@@ -190,11 +192,7 @@ async function plan(
       : candidates;
   if (!agents.length) return none;
 
-  const choices = [
-    ...(opts.skipSkills ? [] : [BUNDLES.skills]),
-    ...(opts.skipSkills || opts.skipWorkflows ? [] : [BUNDLES.workflows]),
-    BUNDLES.mcp,
-  ];
+  const choices = [BUNDLES.skills, ...(opts.skipWorkflows ? [] : [BUNDLES.workflows]), BUNDLES.mcp];
   const defaults = choices.map((c) => c.value).filter((v) => v !== "workflows");
   const bundles = interactive
     ? await host.prompt.multiselect("What should I install?", choices, defaults)

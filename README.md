@@ -113,8 +113,9 @@ tvly search "latest AI trends"
 
 Skills are installed with the [skills.sh CLI](https://skills.sh)
 (`npx skills add tavily-ai/skills`), and the workflows the same way
-(`npx skills add tavily-ai/official-workflows`), so both need `npx` on your PATH.
-Without it, use `--skip-skills`, which skips both. `--skip-workflows` skips only the workflows. Restart your agent after new skills are installed.
+(`npx skills add tavily-ai/official-workflows`), and the MCP server is added with
+`npx add-mcp`, so all three need `npx` on your PATH. Without it, use `--skip-skills`,
+which leaves your coding agents alone: no skills, workflows, or MCP server. `--skip-workflows` skips only the workflows. Restart your agent after new skills are installed.
 
 ```bash
 # Set up one or more supported agents
@@ -130,7 +131,7 @@ tvly init --api-key tvly-YOUR_KEY
 # Install skills and verify keyless search if no credential is configured
 tvly init --skip-auth
 
-# Authenticate and verify the CLI without installing agent skills
+# Authenticate and verify the CLI without touching coding agents
 tvly init --skip-skills
 ```
 
@@ -424,7 +425,7 @@ Run first-time setup, install or update the Tavily skills (through
 | `--agent` | Install skills for `claude-code`, `codex`, or `cursor`; repeat to select more than one |
 | `--yes` | Accept every default without prompting (all detected agents; skills and MCP) |
 | `--skip-auth` | Skip login when no credential is configured; existing credentials are still used |
-| `--skip-skills` | Skip agent-skill and workflow installation and updates |
+| `--skip-skills` | Leave coding agents alone: no skills, workflows, or MCP server |
 | `--skip-workflows` | Skip installing the official workflows from `tavily-ai/official-workflows` |
 | `--skip-install` | Skip the global `tvly` install |
 | `--api-key` | Authenticate with an API key instead of OAuth |
