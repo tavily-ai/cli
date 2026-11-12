@@ -154,7 +154,7 @@ describe("keyless cap rendering", () => {
         retryAfter: 90,
         continuationPaths: [
           { type: "signup", resource: "https://app.tavily.com" },
-          { type: "agentic_payment", scheme: "x402", details: "pay here" },
+          { type: "agentic_payment", scheme: "x402", resource: "pay here" },
           {
             type: "bonus_credits",
             resource: "/v1/keyless/bonus",

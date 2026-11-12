@@ -82,7 +82,7 @@ export function formatKeylessEnvelopeForTerminal(
     }
     if (payment) {
       const label = `  - Pay via ${orDefault(payment.scheme, "x402")} agentic payment`;
-      const resource = payment.resource ?? payment.details;
+      const resource = payment.resource;
       lines.push(resource ? `${label}:  ${resource}` : label);
       if (payment.instruction) lines.push(`      ${payment.instruction}`);
     }
@@ -100,7 +100,7 @@ export function formatKeylessEnvelopeForTerminal(
         questions.forEach((q, i) => {
           if (typeof q === "string") lines.push(`      ${i + 1}. ${q}`);
         });
-        lines.push(`    POST your answers to: ${orDefault(bonus.endpoint, "/v1/keyless/bonus")}`);
+        lines.push(`    POST your answers to: ${orDefault(bonus.resource, "/v1/keyless/bonus")}`);
       }
     }
   }
