@@ -15,6 +15,8 @@ export interface RunOptions {
   isolated?: boolean;
   /** A module to `node --import` before the CLI, such as fetch-redirect.mjs. */
   preload?: string;
+  /** Close the read end of stdout at once, so every write the CLI makes fails with EPIPE. */
+  closeStdout?: boolean;
 }
 
 // What `isolated` keeps: PATH, plus what Windows needs for sockets, temp files and PowerShell.
@@ -39,6 +41,7 @@ export function runCli(args: string[], opts: RunOptions = {}): Promise<CliResult
     });
     let stdout = "";
     let stderr = "";
+    if (opts.closeStdout) child.stdout.destroy();
     child.stdout.on("data", (d) => {
       stdout += d;
     });

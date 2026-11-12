@@ -24,5 +24,10 @@ export async function main(host: Host): Promise<number> {
 
 const entry = process.argv[1];
 if (entry && realpathSync(entry) === fileURLToPath(import.meta.url)) {
+  // `tvly ... | head`: the reader closing the pipe is its choice, not an error.
+  process.stdout.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code !== "EPIPE") throw err;
+    process.exit(0);
+  });
   process.exitCode = await main(realHost());
 }
