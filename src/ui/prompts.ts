@@ -18,7 +18,7 @@ export interface Prompter {
 const output = process.stderr;
 
 /** Ctrl-C or Esc at a prompt ends the run with exit code 1. */
-function answered<T>(value: T): Exclude<T, symbol> {
+export function answered<T>(value: T): Exclude<T, symbol> {
   if (clack.isCancel(value)) {
     clack.cancel("Setup cancelled.", { output });
     throw new ExitError(1);

@@ -284,6 +284,13 @@ describe("init pickers", () => {
     await expect(run({}, new Command(), host)).rejects.toMatchObject({ code: 1 });
   });
 
+  test("cancel at the sign-in question exits 1, not the auth failure code 3", async () => {
+    const { host, select } = setup({ agents: [] }, { env: {} });
+    select.mockRejectedValueOnce(new ExitError(1));
+    await expect(run({}, new Command(), host)).rejects.toMatchObject({ code: 1 });
+    expect(select).toHaveBeenCalledOnce();
+  });
+
   test("--json output is a single JSON object", async () => {
     const { host } = setup();
     expect(await runInit(["--json", "--yes"], host)).toBe(0);
