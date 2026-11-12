@@ -3,9 +3,11 @@ import { join } from "node:path";
 import { Command } from "commander";
 import { describe, expect, test, vi } from "vitest";
 import { run } from "../src/commands/init.js";
+import { getApiKey } from "../src/core/config.js";
 import { detectPackageManager } from "../src/core/install-detect.js";
 import { MCP_SERVER_URL } from "../src/core/mcp-setup.js";
 import { SKILLS_REPO, WORKFLOWS_REPO } from "../src/core/skills.js";
+import { ExitError } from "../src/errors.js";
 import type { Host } from "../src/host.js";
 import { captureOutput } from "./helpers/capture.js";
 import { type ExecScript, type FakeExec, fakeExec } from "./helpers/exec.js";
@@ -75,7 +77,8 @@ describe("init", () => {
       ],
       opts: { timeoutMs: 300_000 },
     });
-    expect(skillRepos(exec)).toEqual([SKILLS_REPO, WORKFLOWS_REPO]);
+    expect(skillRepos(exec)).toEqual([SKILLS_REPO]);
+    expect(output.mcp).toEqual({ agents: ["codex"], skipped: false });
   });
 
   test("non-interactive auth failure is JSON", async () => {
@@ -122,11 +125,6 @@ describe("init", () => {
     expect(stdoutJson().error.stage).toBe("live_search");
   });
 
-  test("--all with --agent is a usage error", async () => {
-    expect(await runInit(["--all", "--agent", "codex"], initHost())).toBe(2);
-    expect(io.stderr()).toContain("error: Use either --all or --agent, not both.");
-  });
-
   test("--agent rejects unknown names and accepts any case", async () => {
     const host = initHost();
     expect(await runInit(["--agent", "bogus"], host)).toBe(2);
@@ -152,109 +150,160 @@ describe("init", () => {
   });
 });
 
-describe("init workflows", () => {
-  const WORKFLOWS_QUESTION = `Install the Tavily official workflows (${WORKFLOWS_REPO})?`;
+describe("init pickers", () => {
+  const AGENTS_QUESTION = "Set up which agents?";
+  const INSTALL_QUESTION = "What should I install?";
 
-  function setup(answers: { skills?: boolean; workflows?: boolean } = {}, run?: ExecScript) {
-    const confirm = vi.fn(async (question: string, defaultYes?: boolean) =>
-      defaultYes === false
-        ? false
-        : question === WORKFLOWS_QUESTION
-          ? (answers.workflows ?? true)
-          : (answers.skills ?? true),
+  /** A TTY host whose pickers answer from `answers` by message, else take the pre-checked default. */
+  function setup(
+    opts: { agents?: string[]; answers?: Record<string, unknown>; run?: ExecScript } = {},
+    over: Partial<Host> = {},
+  ) {
+    const answers = opts.answers ?? {};
+    const multiselect = vi.fn(
+      async (message: string, _choices: unknown, initial: string[]) => answers[message] ?? initial,
     );
-    const exec = fakeExec(run ? { run } : {});
-    const host = initHost({ stdinIsTTY: true, prompt: { ...fakeHost().prompt, confirm }, exec });
-    mkdirSync(join(host.home, ".codex"));
-    return { host, confirm, exec };
+    const select = vi.fn(
+      async (message: string, _choices: unknown, initial?: string) => answers[message] ?? initial,
+    );
+    const password = vi.fn(async () => "tvly-abc");
+    const prompt = {
+      ...fakeHost().prompt,
+      multiselect,
+      select,
+      password,
+    } as unknown as Host["prompt"];
+    const exec = fakeExec(opts.run ? { run: opts.run } : {});
+    const host = initHost({ stdinIsTTY: true, prompt, exec, ...over });
+    for (const dir of opts.agents ?? [".claude", ".codex"]) mkdirSync(join(host.home, dir));
+    return { host, exec, multiselect, select };
   }
 
-  test("installs the workflows when the prompt is accepted", async () => {
-    const { host, confirm, exec } = setup();
-    expect(await runInit([], host)).toBe(0);
-    expect(confirm).toHaveBeenCalledWith(WORKFLOWS_QUESTION);
-    expect(skillRepos(exec)).toEqual([SKILLS_REPO, WORKFLOWS_REPO]);
-    expect(exec.calls.every((c) => c.args.includes("codex"))).toBe(true);
-    expect(io.stdout()).toContain("Tavily workflows ready for codex");
-  });
+  /** The `--agent` list of each `npx skills add` run. */
+  const skillAgents = (exec: FakeExec) =>
+    exec.calls.filter((c) => c.args[1] === SKILLS_PACKAGE).map((c) => c.args.slice(8, -1));
 
-  // --json never prompts, so the declined prompts are checked through the human summary.
-  test("declining the workflows prompt skips them", async () => {
-    const { host, exec } = setup({ workflows: false });
-    expect(await runInit([], host)).toBe(0);
+  function expectDefaults(exec: FakeExec) {
     expect(skillRepos(exec)).toEqual([SKILLS_REPO]);
-    expect(io.stdout()).toContain("• Workflows skipped");
-  });
-
-  test("declining skills still asks about the workflows", async () => {
-    const { host, confirm, exec } = setup({ skills: false });
-    expect(await runInit([], host)).toBe(0);
-    expect(confirm).toHaveBeenCalledWith(WORKFLOWS_QUESTION);
-    expect(skillRepos(exec)).toEqual([WORKFLOWS_REPO]);
-    expect(io.stdout()).toContain("• Skills skipped");
-    expect(io.stdout()).toContain("Tavily workflows ready for codex");
-  });
-
-  test("--skip-workflows installs skills only", async () => {
-    const { host, confirm, exec } = setup();
-    expect(await runInit(["--skip-workflows", "--json"], host)).toBe(0);
-    expect(confirm).not.toHaveBeenCalled();
-    expect(skillRepos(exec)).toEqual([SKILLS_REPO]);
-    expect(stdoutJson().workflows).toEqual({
-      source: WORKFLOWS_REPO,
-      agents: [],
-      restart_required: false,
-      skipped: true,
-    });
-  });
-
-  test("--yes installs skills and workflows without prompting", async () => {
-    const { host, confirm, exec } = setup();
-    expect(await runInit(["--yes", "--json"], host)).toBe(0);
-    expect(confirm).not.toHaveBeenCalled();
-    expect(skillRepos(exec)).toEqual([SKILLS_REPO, WORKFLOWS_REPO]);
-    expect(stdoutJson().workflows).toMatchObject({ agents: ["codex"], skipped: false });
-  });
-
-  test("--skip-skills skips skills and workflows", async () => {
-    const { host, confirm, exec } = setup();
-    expect(await runInit(["--skip-skills", "--json"], host)).toBe(0);
-    expect(confirm).not.toHaveBeenCalled();
-    expect(exec.calls).toEqual([]);
-    expect(stdoutJson()).toMatchObject({ skills: { skipped: true }, workflows: { skipped: true } });
-  });
-
-  test("a workflows install failure is stage workflows, exit one", async () => {
-    const { host } = setup({}, (_bin, args) =>
-      args[3] === WORKFLOWS_REPO ? { ok: false, failure: "boom" } : undefined,
-    );
-    expect(await runInit(["--yes", "--json"], host)).toBe(1);
-    expect(stdoutJson().error).toEqual({ stage: "workflows", message: "npx skills failed: boom" });
-  });
-});
-
-describe("init mcp", () => {
-  const MCP_QUESTION = "Add the Tavily MCP server to codex (hosted, signs in with OAuth)?";
-
-  function setup(answer: boolean) {
-    const confirm = vi.fn(async (question: string) => question === MCP_QUESTION && answer);
-    const exec = fakeExec();
-    const host = initHost({ stdinIsTTY: true, prompt: { ...fakeHost().prompt, confirm }, exec });
-    mkdirSync(join(host.home, ".codex"));
-    return { host, confirm, exec };
+    expect(skillAgents(exec)).toEqual([["claude-code", "codex"]]);
+    expect(io.stdout()).toContain("Tavily MCP server ready for claude-code, codex");
   }
 
-  test("the prompt defaults to no, which leaves MCP alone and hints at setup mcp", async () => {
-    const { host, confirm, exec } = setup(false);
+  test("defaults install skills and MCP for every detected agent", async () => {
+    const { host, exec, multiselect } = setup();
     expect(await runInit([], host)).toBe(0);
-    expect(confirm).toHaveBeenCalledWith(MCP_QUESTION, false);
-    expect(exec.calls).toEqual([]);
+    expect(multiselect).toHaveBeenCalledTimes(2);
+    expectDefaults(exec);
+  });
+
+  test("--yes takes the same defaults without prompting", async () => {
+    const { host, exec, multiselect, select } = setup();
+    expect(await runInit(["--yes"], host)).toBe(0);
+    expect(multiselect).not.toHaveBeenCalled();
+    expect(select).not.toHaveBeenCalled();
+    expectDefaults(exec);
+  });
+
+  test("a non-TTY run takes the same defaults", async () => {
+    const { host, exec, multiselect, select } = setup({}, { stdinIsTTY: false });
+    expect(await runInit([], host)).toBe(0);
+    expect(multiselect).not.toHaveBeenCalled();
+    expect(select).not.toHaveBeenCalled();
+    expectDefaults(exec);
+  });
+
+  test("workflows install only when picked", async () => {
+    const { host, exec } = setup({ answers: { [INSTALL_QUESTION]: ["skills", "workflows"] } });
+    expect(await runInit([], host)).toBe(0);
+    expect(skillRepos(exec)).toEqual([SKILLS_REPO, WORKFLOWS_REPO]);
+    expect(io.stdout()).toContain("Tavily workflows ready for claude-code, codex");
+    expect(io.stdout()).not.toContain("MCP server ready");
     expect(io.stdout()).toContain("tvly setup mcp");
   });
 
-  test("accepting the prompt configures MCP from the environment key, even with --skip-skills", async () => {
-    const { host, exec } = setup(true);
-    expect(await runInit(["--skip-skills"], host)).toBe(0);
+  test("--agent cursor skips the agent picker but still asks what to install", async () => {
+    const { host, exec, multiselect } = setup();
+    expect(await runInit(["--agent", "cursor"], host)).toBe(0);
+    expect(multiselect).toHaveBeenCalledOnce();
+    expect(multiselect.mock.calls[0]?.[0]).toBe(INSTALL_QUESTION);
+    expect(skillAgents(exec)).toEqual([["cursor"]]);
+    expect(io.stdout()).toContain("Tavily MCP server ready for cursor");
+  });
+
+  test("deselecting every agent installs nothing", async () => {
+    const { host, exec, multiselect } = setup({ answers: { [AGENTS_QUESTION]: [] } });
+    expect(await runInit([], host)).toBe(0);
+    expect(multiselect).toHaveBeenCalledOnce();
+    expect(exec.calls).toEqual([]);
+    expect(io.stdout()).toContain("• Skills skipped");
+  });
+
+  test("no detected agents skips the pickers", async () => {
+    const { host, exec, multiselect } = setup({ agents: [] });
+    expect(await runInit([], host)).toBe(0);
+    expect(multiselect).not.toHaveBeenCalled();
+    expect(exec.calls).toEqual([]);
+    expect(io.stderr()).toContain("No coding agents found.");
+    expect(io.stdout()).toContain("Live search verified");
+  });
+
+  test("--skip-workflows removes the workflows choice", async () => {
+    const { host, multiselect } = setup();
+    expect(await runInit(["--skip-workflows"], host)).toBe(0);
+    expect(multiselect).toHaveBeenLastCalledWith(
+      INSTALL_QUESTION,
+      [expect.objectContaining({ value: "skills" }), expect.objectContaining({ value: "mcp" })],
+      ["skills", "mcp"],
+    );
+  });
+
+  test("sign-in select: paste a key saves it", async () => {
+    const { host } = setup(
+      { agents: [], answers: { "How do you want to sign in?": "key" } },
+      { env: {} },
+    );
+    expect(await runInit([], host)).toBe(0);
+    expect(await getApiKey(host)).toBe("tvly-abc");
+    expect(io.stdout()).toContain("Authenticated via api_key");
+  });
+
+  test("sign-in select: keyless continues without a key", async () => {
+    const { host } = setup(
+      { agents: [], answers: { "How do you want to sign in?": "keyless" } },
+      { env: {} },
+    );
+    const login = vi.fn();
+    await run({}, new Command(), host, { login });
+    expect(login).not.toHaveBeenCalled();
+    expect(io.stdout()).toContain("Keyless mode");
+  });
+
+  test("cancel at a prompt exits 1", async () => {
+    const { host, multiselect } = setup();
+    multiselect.mockRejectedValueOnce(new ExitError(1));
+    await expect(run({}, new Command(), host)).rejects.toMatchObject({ code: 1 });
+  });
+
+  test("--json output is a single JSON object", async () => {
+    const { host } = setup();
+    expect(await runInit(["--json", "--yes"], host)).toBe(0);
+    expect(io.stdout().trim().split("\n")).toHaveLength(1);
+    expect(stdoutJson()).toMatchObject({ ok: true, mcp: { skipped: false } });
+  });
+
+  test("a workflows install failure is stage workflows, exit one", async () => {
+    const { host } = setup({
+      answers: { [INSTALL_QUESTION]: ["workflows"] },
+      run: (_bin, args) =>
+        args[3] === WORKFLOWS_REPO ? { ok: false, failure: "boom" } : undefined,
+    });
+    expect(await runInit([], host)).toBe(1);
+    expect(io.stdout()).toContain("Setup failed: npx skills failed: boom");
+  });
+
+  test("MCP uses the environment key for codex, even with --skip-skills", async () => {
+    const { host, exec } = setup({ agents: [".codex"] }, { stdinIsTTY: false });
+    expect(await runInit(["--skip-skills", "--json"], host)).toBe(0);
     expect(exec.calls).toEqual([
       {
         bin: "/usr/bin/codex",
@@ -270,17 +319,7 @@ describe("init mcp", () => {
         opts: { timeoutMs: 300_000 },
       },
     ]);
-    expect(io.stdout()).toContain("Tavily MCP server ready for codex");
-    expect(io.stdout()).toContain("Using TAVILY_API_KEY from your environment");
-    expect(io.stdout()).not.toContain("tvly setup mcp");
-  });
-
-  test("--yes never configures MCP", async () => {
-    const { host, confirm, exec } = setup(true);
-    expect(await runInit(["--yes", "--json"], host)).toBe(0);
-    expect(confirm).not.toHaveBeenCalled();
-    expect(exec.calls.map((c) => c.args[1])).toEqual([SKILLS_PACKAGE, SKILLS_PACKAGE]);
-    expect(stdoutJson().mcp).toEqual({ agents: [], skipped: true });
+    expect(stdoutJson().mcp).toEqual({ agents: ["codex"], skipped: false });
   });
 });
 
