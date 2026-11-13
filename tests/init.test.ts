@@ -29,6 +29,9 @@ const SKILLS_PACKAGE = "skills@1.7.4";
 const skillRepos = (exec: FakeExec) =>
   exec.calls.filter((c) => c.args[1] === SKILLS_PACKAGE).map((c) => c.args[3]);
 
+/** Every recorded run except the `tvly --version` probe for a legacy Python CLI. */
+const installs = (exec: FakeExec) => exec.calls.filter((c) => c.args[0] !== "--version");
+
 /** An npx whose skills install writes one skill, so the first install asks for a restart. */
 const writingSkills = (home: string) =>
   fakeExec({
@@ -44,7 +47,7 @@ describe("init", () => {
   test("skips skills without detected agents", async () => {
     const host = initHost();
     expect(await runInit(["--json"], host)).toBe(0);
-    expect((host.exec as FakeExec).calls).toEqual([]);
+    expect(installs(host.exec as FakeExec)).toEqual([]);
     expect(stdoutJson().skills).toMatchObject({ agents: [], skipped: true });
   });
 
@@ -61,7 +64,7 @@ describe("init", () => {
     expect(output.skills.restart_required).toBe(true);
     expect(output.skills.source).toBe("tavily-ai/skills");
     expect(output.verification.live_search).toBe(true);
-    expect(exec.calls[0]).toEqual({
+    expect(installs(exec)[0]).toEqual({
       bin: "/usr/bin/npx",
       args: [
         "--yes",
@@ -237,7 +240,7 @@ describe("init pickers", () => {
     const { host, exec, multiselect } = setup({ answers: { [AGENTS_QUESTION]: [] } });
     expect(await runInit([], host)).toBe(0);
     expect(multiselect).toHaveBeenCalledOnce();
-    expect(exec.calls).toEqual([]);
+    expect(installs(exec)).toEqual([]);
     expect(io.stdout()).toContain("• Skills skipped");
   });
 
@@ -245,7 +248,7 @@ describe("init pickers", () => {
     const { host, exec, multiselect } = setup({ agents: [] });
     expect(await runInit([], host)).toBe(0);
     expect(multiselect).not.toHaveBeenCalled();
-    expect(exec.calls).toEqual([]);
+    expect(installs(exec)).toEqual([]);
     expect(io.stderr()).toContain("No coding agents found.");
     expect(io.stdout()).toContain("Live search verified");
   });
@@ -314,7 +317,7 @@ describe("init pickers", () => {
   test("--skip-skills leaves agents alone: no skills, workflows, or MCP", async () => {
     const { host, exec } = setup({ agents: [".claude"] });
     expect(await runInit(["--skip-skills", "--yes", "--json"], host)).toBe(0);
-    expect(exec.calls).toEqual([]);
+    expect(installs(exec)).toEqual([]);
     expect(stdoutJson()).toMatchObject({
       skills: { skipped: true },
       workflows: { skipped: true },
@@ -325,7 +328,7 @@ describe("init pickers", () => {
   test("MCP uses the environment key for codex", async () => {
     const { host, exec } = setup({ agents: [".codex"], answers: { [INSTALL_QUESTION]: ["mcp"] } });
     expect(await runInit([], host)).toBe(0);
-    expect(exec.calls).toEqual([
+    expect(installs(exec)).toEqual([
       {
         bin: "/usr/bin/codex",
         args: [
@@ -411,6 +414,102 @@ describe("init global install", () => {
       "You can run without a global install: npx @tavily/cli <command>",
     );
     expect(io.stdout()).toContain("Setup incomplete: global CLI installation failed.");
+  });
+});
+
+describe("init legacy cli", () => {
+  const LEGACY = "/home/u/.local/bin/tvly";
+  const REMOVE = "Remove it with `uv tool uninstall tavily-cli`?";
+
+  /** A Python tvly first on PATH that uv owns unless `owner` is false; removal takes it off PATH. */
+  function setup(
+    opts: { version?: string; owner?: boolean; answer?: boolean; tty?: boolean } = {},
+  ) {
+    let removed = false;
+    let installed = false;
+    const confirm = vi.fn(async (_question: string) => opts.answer ?? true);
+    const exec = fakeExec({
+      which: (name) => {
+        // PATH order: the Python tvly first, then npm's global bin.
+        if (name === "tvly") return removed ? (installed ? "/opt/npm/bin/tvly" : null) : LEGACY;
+        if (name === "uv" || name === "pipx")
+          return opts.owner === false ? null : `/usr/bin/${name}`;
+        return `/usr/bin/${name}`;
+      },
+      run: (bin, args) => {
+        if (bin === LEGACY) return { stdout: `tavily-cli ${opts.version ?? "0.2.1"}\n` };
+        if (args[0] === "tool" && args[1] === "list")
+          return { stdout: "tavily-cli v0.2.1\n- tvly\n" };
+        if (args[0] === "tool" && args[1] === "uninstall") removed = true;
+        if (args[0] === "install") installed = true;
+        if (args[0] === "prefix") return { stdout: "/opt/npm\n" };
+        return undefined;
+      },
+    });
+    const host = initHost({
+      env: { TAVILY_API_KEY: "tvly-test", SHELL: "/bin/zsh" },
+      platform: "darwin",
+      exec,
+      stdinIsTTY: opts.tty ?? true,
+      stderrIsTTY: opts.tty ?? true,
+      prompt: { ...fakeHost().prompt, confirm },
+    });
+    return { host, confirm, exec };
+  }
+
+  const uninstalls = (exec: FakeExec) => exec.calls.filter((c) => c.args[1] === "uninstall");
+
+  test("offers to remove a uv-installed Python tvly, then installs this one", async () => {
+    const { host, confirm, exec } = setup();
+    expect(await runInit(["--skip-skills"], host)).toBe(0);
+    expect(confirm.mock.calls.map((c) => c[0])).toEqual([REMOVE, "Install tvly globally?"]);
+    expect(uninstalls(exec)).toEqual([
+      {
+        bin: "/usr/bin/uv",
+        args: ["tool", "uninstall", "tavily-cli"],
+        opts: { timeoutMs: 60_000 },
+      },
+    ]);
+    expect(io.stderr()).toContain("Removed the Python tvly");
+    expect(io.stdout()).toContain("tvly installed globally (npm)");
+  });
+
+  test("declining keeps it and still treats tvly as missing", async () => {
+    const { host, confirm, exec } = setup({ answer: false });
+    expect(await runInit(["--skip-skills"], host)).toBe(1);
+    expect(confirm.mock.calls.map((c) => c[0])).toEqual([REMOVE, "Install tvly globally?"]);
+    expect(uninstalls(exec)).toEqual([]);
+    expect(io.stdout()).toContain("tvly is not available on PATH.");
+  });
+
+  test("without uv or pipx it only says how to remove it", async () => {
+    const { host, confirm, exec } = setup({ owner: false });
+    expect(await runInit(["--skip-skills"], host)).toBe(0);
+    // The Python tvly stays first on PATH, so init offers to put npm's bin ahead of it.
+    expect(confirm.mock.calls.map((c) => c[0])).toEqual([
+      "Install tvly globally?",
+      "Add /opt/npm/bin to PATH in ~/.zshrc?",
+    ]);
+    expect(uninstalls(exec)).toEqual([]);
+    expect(io.stderr()).toContain(`The old Python tvly (0.2.1) at ${LEGACY} shadows this install.`);
+    expect(io.stderr()).toContain("'uv tool uninstall tavily-cli' or 'pip uninstall tavily-cli'");
+  });
+
+  test("a non-interactive run warns and never removes anything", async () => {
+    const { host, confirm, exec } = setup({ tty: false });
+    expect(await runInit(["--skip-skills", "--yes", "--json"], host)).toBe(0);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(uninstalls(exec)).toEqual([]);
+    expect(io.stderr()).toContain("shadows this install.");
+    expect(stdoutJson().install).toMatchObject({ global: true, manager: "npm" });
+  });
+
+  test("a 1.x tvly on PATH is this CLI and is left alone", async () => {
+    const { host, confirm, exec } = setup({ version: "1.0.0" });
+    expect(await runInit(["--skip-skills"], host)).toBe(0);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(exec.calls.map((c) => c.args)).toEqual([["--version"]]);
+    expect(io.stderr()).not.toContain("shadows");
   });
 });
 

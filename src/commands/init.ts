@@ -11,6 +11,7 @@ import {
   MANAGER_COMMANDS,
   MANAGER_RUNNERS,
 } from "../core/install-detect.js";
+import { findLegacyCli } from "../core/legacy-cli.js";
 import { installMcp, MCP_AUTH_NOTE, type McpSetupResult } from "../core/mcp-setup.js";
 import { looksHeadless, runBrowserLogin } from "../core/oauth.js";
 import { detectAgents, installAgentSkills, SKILLS_REPO, WORKFLOWS_REPO } from "../core/skills.js";
@@ -62,7 +63,8 @@ export async function run(
   const interactive = host.stdinIsTTY && host.stderrIsTTY && !json && !opts.yes;
   if (interactive) intro("tvly init", { output });
 
-  const cli = await installStep(opts, json, host);
+  const legacy = await legacyStep(interactive, host);
+  const cli = await installStep(opts, json, legacy, host);
   const result = emptyResult();
   result.install = cli.install;
   let mcpSetup: McpSetupResult | null = null;
@@ -205,6 +207,38 @@ async function plan(
 const INSTALL_INCOMPLETE =
   "Setup incomplete: global CLI installation failed. Other completed steps are preserved.";
 
+/**
+ * Step 0: the deprecated Python tvly earlier on PATH would keep running instead of this one.
+ * Offer to remove it when uv or pipx owns it; otherwise say how. Returns the path of a legacy
+ * tvly that is still installed, so the install step does not mistake it for this CLI.
+ */
+async function legacyStep(interactive: boolean, host: Host): Promise<string | null> {
+  const legacy = findLegacyCli(host);
+  if (!legacy) return null;
+  const notice = `The old Python tvly (${legacy.version}) at ${legacy.path} shadows this install.`;
+  const manual = "Remove it with 'uv tool uninstall tavily-cli' or 'pip uninstall tavily-cli'.";
+  if (!interactive) {
+    err(notice);
+    err(manual);
+    return legacy.path;
+  }
+  log.warn(notice, { output });
+  if (!legacy.uninstall) {
+    log.message(manual, { output });
+    return legacy.path;
+  }
+  const [bin, ...args] = legacy.uninstall;
+  const command = [path.basename(bin), ...args].join(" ");
+  if (!(await host.prompt.confirm(`Remove it with \`${command}\`?`))) return legacy.path;
+  const res = await host.exec.runAsync(bin, args, { timeoutMs: 60_000 });
+  if (!res.ok) {
+    log.error(`${command} failed: ${sanitizeControl(res.failure ?? "")}`, { output });
+    return legacy.path;
+  }
+  log.success("Removed the Python tvly", { output });
+  return null;
+}
+
 interface InstallStep {
   install: InitResult["install"];
   failed: boolean;
@@ -212,8 +246,16 @@ interface InstallStep {
 }
 
 /** Step 1 (Firecrawl's flow): install tvly globally unless it already resolves on PATH. */
-async function installStep(opts: InitOptions, json: boolean, host: Host): Promise<InstallStep> {
-  const onPath = () => host.exec.which("tvly") !== null;
+async function installStep(
+  opts: InitOptions,
+  json: boolean,
+  legacy: string | null,
+  host: Host,
+): Promise<InstallStep> {
+  const onPath = () => {
+    const found = host.exec.which("tvly");
+    return found !== null && found !== legacy;
+  };
   const step: InstallStep = {
     install: { global: false, manager: null, on_path: onPath(), path_updated: false },
     failed: false,
