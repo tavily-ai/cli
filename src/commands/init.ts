@@ -465,7 +465,7 @@ function printResult(
   out();
   out("  Try:");
   out(`    ${colors.green('tvly search "latest AI news"')}`);
-  out(`    ${colors.green("tvly extract https://example.com")}`);
+  out(`    ${colors.green("tvly extract https://tavily.com")}`);
   out(`    ${colors.green('tvly research "your topic"')}`);
   out(`    Or ask your agent: "search for the latest AI news"`);
   if (result.mcp.skipped) {
