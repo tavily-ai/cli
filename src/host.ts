@@ -1,8 +1,8 @@
 /** Everything the CLI reads from the machine, in one value; tests substitute a fake. */
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
-import { promptConfirm } from "./commands/options.js";
 import type { TavilyClientLike } from "./core/tavily-client.js";
+import { clackPrompter, type Prompter } from "./ui/prompts.js";
 import { type Exec, exec } from "./util/exec.js";
 
 export interface Host {
@@ -16,7 +16,7 @@ export interface Host {
   now(): number;
   fetch: typeof fetch;
   exec: Exec;
-  confirm(question: string, defaultYes?: boolean): Promise<boolean>;
+  prompt: Prompter;
   openUrl(url: string): void;
   resolveClient(key: string | null, clientName?: string): Promise<TavilyClientLike>;
 }
@@ -51,7 +51,7 @@ export function realHost(): Host {
     now: Date.now,
     fetch: globalThis.fetch,
     exec,
-    confirm: promptConfirm,
+    prompt: clackPrompter,
     openUrl: (url) => openBrowser(url, process.platform),
     resolveClient: async (key, clientName) =>
       (await import("./core/client-factory.js")).buildClient(key, clientName, host),

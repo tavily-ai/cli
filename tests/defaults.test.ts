@@ -123,9 +123,12 @@ test("prompts per agent when no flags are given", async () => {
     cwd: t.cwd,
     env: {},
     stdinIsTTY: true,
-    confirm: async (q) => {
-      questions.push(q);
-      return answers.shift() as boolean;
+    prompt: {
+      ...fakeHost().prompt,
+      confirm: async (q) => {
+        questions.push(q);
+        return answers.shift() as boolean;
+      },
     },
   });
 

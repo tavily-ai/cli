@@ -70,10 +70,15 @@ export function buildProgram(host: Host = realHost()): Command {
     .addOption(
       agentOption("Install skills for an agent. Repeat to select more than one.", AGENT_NAMES),
     )
-    .option("--all", "Install skills for every detected agent.")
-    .option("--yes", "Accept detected agents and the global install without prompting.")
+    .option(
+      "--yes",
+      "Accept every default without prompting (all detected agents; skills and MCP).",
+    )
     .option("--skip-auth", "Keep keyless mode when no credential is configured.")
-    .option("--skip-skills", "Do not install or update Tavily agent skills or workflows.")
+    .option(
+      "--skip-skills",
+      "Leave coding agents alone: no skills, workflows, or MCP server (no npx needed).",
+    )
     .option("--skip-workflows", "Do not install or update the Tavily official workflows.")
     .option("--skip-install", "Do not install tvly globally.")
     .option("--api-key <key>", "Authenticate with a Tavily API key instead of OAuth.")

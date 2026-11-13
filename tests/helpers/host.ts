@@ -43,7 +43,12 @@ export function fakeHost(over: Partial<Host> = {}): Host {
       throw new Error("unexpected fetch");
     },
     exec: fakeExec(),
-    confirm: async (_question, defaultYes = true) => defaultYes,
+    prompt: {
+      confirm: async (_message, initial = true) => initial,
+      select: async (_message, choices, initial) => initial ?? (choices[0]?.value as never),
+      multiselect: async (_message, _choices, initial) => initial,
+      password: async () => "",
+    },
     openUrl: () => {},
     resolveClient: async () => stubClient({}),
     ...over,

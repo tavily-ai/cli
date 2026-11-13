@@ -21,7 +21,7 @@ export interface DefaultsOptions {
   project?: boolean;
 }
 
-type DefaultsHost = Pick<Host, "home" | "env" | "cwd" | "stdinIsTTY" | "confirm">;
+type DefaultsHost = Pick<Host, "home" | "env" | "cwd" | "stdinIsTTY" | "prompt">;
 
 interface Mode {
   verb: string;
@@ -67,7 +67,7 @@ async function selectTargets(
   const selected: Agent[] = [];
   for (const agent of ["claude", "codex"] as const) {
     const scope = opts.project ? " in this project" : "";
-    if (await host.confirm(`${mode.verb} for ${TARGETS[agent].label}${scope}?`)) {
+    if (await host.prompt.confirm(`${mode.verb} for ${TARGETS[agent].label}${scope}?`)) {
       selected.push(agent);
     }
   }

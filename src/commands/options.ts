@@ -1,5 +1,4 @@
-/** Option and prompt helpers that load only commander and readline, so the CLI entry point stays free of the SDK. */
-import { createInterface } from "node:readline/promises";
+/** Option helpers that load only commander, so the CLI entry point stays free of the SDK. */
 import { type Command, InvalidArgumentError, Option } from "commander";
 
 /** `--json` anywhere up the command chain. */
@@ -45,17 +44,4 @@ export function parseNumberArg(
     throw new InvalidArgumentError(`${n} is above the maximum ${opts.maximum}.`);
   }
   return n;
-}
-
-/** Ask `question [Y/n]` (or `[y/N]` when `defaultYes` is false); an empty answer means the default. */
-export async function promptConfirm(question: string, defaultYes = true): Promise<boolean> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const hint = defaultYes ? "[Y/n]" : "[y/N]";
-    const answer = (await rl.question(`${question} ${hint}: `)).trim().toLowerCase();
-    if (answer === "") return defaultYes;
-    return answer === "y" || answer === "yes";
-  } finally {
-    rl.close();
-  }
 }

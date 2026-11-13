@@ -24,7 +24,7 @@ CLI and agent tools for the [Tavily API](https://docs.tavily.com) — search, ex
 npx @tavily/cli init
 ```
 
-This installs `tvly` globally, authenticates, installs the Tavily skills for the agents it detects (Claude Code, Codex, Cursor), offers the official workflows from `tavily-ai/official-workflows`, and verifies a live search. Add `--yes` to run it without prompts, or `--skip-install` to leave `tvly` uninstalled.
+This installs `tvly` globally, asks how to sign in, which detected agents (Claude Code, Codex, Cursor) to set up, and what to install for them (Tavily skills, the official workflows from `tavily-ai/official-workflows`, the hosted MCP server), then verifies a live search. Add `--yes` to accept the defaults without prompts, or `--skip-install` to leave `tvly` uninstalled.
 
 Requires **Node.js 20.1+**.
 
@@ -104,23 +104,26 @@ tvly search "latest AI trends"
 `tvly init` guides you through:
 
 1. **Global install:** if `tvly` is not on your PATH, install it globally with the package manager that ran `init` (npm, pnpm, yarn, or bun). If the install directory is not on your PATH, `init` offers to add it to your shell profile, or prints the line to add yourself.
-2. **Authentication:** reuse an existing credential or sign in through browser OAuth.
-3. **Agent setup:** detect Claude Code, Codex, and Cursor, install the Tavily agent skills, and offer the official workflows from `tavily-ai/official-workflows`.
-4. **MCP server (optional):** offer to add the hosted Tavily MCP server to the detected agents. The prompt defaults to no, and non-interactive runs (`--yes`, `--json`, no TTY) skip it; `tvly setup mcp` adds it later.
+2. **How do you want to sign in?** Reuse an existing credential, or pick browser login (the default), paste an API key, or continue without a key (rate-limited).
+3. **Which agents do you want to install to?** Every detected agent (Claude Code, Codex, Cursor) is pre-checked; press Enter to accept. `--agent` picks the agents and skips this question.
+4. **What should I install?** Tavily skills and the hosted Tavily MCP server are checked; the official workflows from `tavily-ai/official-workflows` are not. `tvly setup mcp` adds the MCP server later.
 5. **Verification:** check the CLI, then run a live search.
+
+`--yes`, `--json`, and runs without a TTY ask nothing and take the defaults: every detected agent (or the `--agent` list), with skills and the MCP server.
 
 Skills are installed with the [skills.sh CLI](https://skills.sh)
 (`npx skills add tavily-ai/skills`), and the workflows the same way
-(`npx skills add tavily-ai/official-workflows`), so both need `npx` on your PATH.
-Without it, use `--skip-skills`, which skips both. `--skip-workflows` skips only the workflows. Restart your agent after new skills are installed.
+(`npx skills add tavily-ai/official-workflows`), and the MCP server is added with
+`npx add-mcp`, so all three need `npx` on your PATH. Without it, use `--skip-skills`,
+which leaves your coding agents alone: no skills, workflows, or MCP server. `--skip-workflows` skips only the workflows. Restart your agent after new skills are installed.
 
 ```bash
 # Set up one or more supported agents
 tvly init --agent codex
 tvly init --agent claude-code --agent cursor
 
-# Set up every detected agent without the agent-selection prompt
-tvly init --all --yes
+# Accept every default without prompting
+tvly init --yes
 
 # Authenticate with an API key instead of OAuth
 tvly init --api-key tvly-YOUR_KEY
@@ -128,7 +131,7 @@ tvly init --api-key tvly-YOUR_KEY
 # Install skills and verify keyless search if no credential is configured
 tvly init --skip-auth
 
-# Authenticate and verify the CLI without installing agent skills
+# Authenticate and verify the CLI without touching coding agents
 tvly init --skip-skills
 ```
 
@@ -358,11 +361,11 @@ tvly
 
 Use `--json` for structured output. For unattended setup, provide a credential
 through `TAVILY_API_KEY` or choose `--skip-auth` for keyless search and extract.
-`--yes` accepts agent selection; it does not complete browser authentication.
+`--yes` accepts the default agents and bundles; it does not complete browser authentication.
 
 ```bash
 # With TAVILY_API_KEY already supplied by your environment
-tvly init --all --yes --json
+tvly init --yes --json
 
 # Keyless setup for Codex when no credential is configured
 tvly init --agent codex --skip-auth --yes --json
@@ -373,8 +376,8 @@ tvly init --skip-auth --skip-skills --json
 
 Setup JSON includes `ok`, `mode`, `install`, `auth`, `skills`, `workflows`, `mcp`, and
 `verification`. On failure, `error.stage` identifies the failed step. Setup always performs a
-live search, so it needs network access even with `--skip-skills`. Non-interactive setup never
-configures the MCP server, so `mcp` is `{ "agents": [], "skipped": true }`; use `tvly setup mcp`.
+live search, so it needs network access even with `--skip-skills`. Non-interactive setup adds
+the MCP server to the selected agents, as the interactive default does.
 
 ```bash
 # Every command supports --json for structured output
@@ -420,19 +423,18 @@ Run first-time setup, install or update the Tavily skills (through
 | Option | Description |
 |--------|-------------|
 | `--agent` | Install skills for `claude-code`, `codex`, or `cursor`; repeat to select more than one |
-| `--all` | Install skills for every detected agent |
-| `--yes` | Accept detected agents and the global install without prompting |
+| `--yes` | Accept every default without prompting (all detected agents; skills and MCP) |
 | `--skip-auth` | Skip login when no credential is configured; existing credentials are still used |
-| `--skip-skills` | Skip agent-skill and workflow installation and updates |
+| `--skip-skills` | Leave coding agents alone: no skills, workflows, or MCP server |
 | `--skip-workflows` | Skip installing the official workflows from `tavily-ai/official-workflows` |
 | `--skip-install` | Skip the global `tvly` install |
 | `--api-key` | Authenticate with an API key instead of OAuth |
 | `--browser` / `--no-browser` | Open OAuth in a browser or print the URL; both require the local callback |
 
-Use either `--all` or `--agent`. `--skip-auth` and `--api-key` cannot be
-combined. `--json` is a global flag accepted by every command; with `tvly init`
-it returns structured setup and verification results and selects detected
-agents without prompting, but does not skip authentication.
+`--skip-auth` and `--api-key` cannot be combined. `--json` is a global flag
+accepted by every command; with `tvly init` it returns structured setup and
+verification results and takes the defaults without prompting, but does not
+skip authentication.
 
 ### `tvly setup mcp`
 

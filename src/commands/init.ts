@@ -1,6 +1,7 @@
 /** tvly init — install tvly globally, authenticate, install Tavily skills and workflows, and verify. */
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { intro, log, outro } from "@clack/prompts";
 import type { Command } from "commander";
 import { authMethod, getApiKey, saveApiKey, saveOauthSession } from "../core/config.js";
 import {
@@ -15,6 +16,8 @@ import { looksHeadless, runBrowserLogin } from "../core/oauth.js";
 import { detectAgents, installAgentSkills, SKILLS_REPO, WORKFLOWS_REPO } from "../core/skills.js";
 import { ExitError, messageOf } from "../errors.js";
 import type { Host } from "../host.js";
+import type { Choice } from "../ui/prompts.js";
+import { withSpinner } from "../ui/spinner.js";
 import { sanitizeControl } from "../ui/text.js";
 import { colors, err, out } from "../ui/theme.js";
 import { VERSION } from "../version.js";
@@ -23,7 +26,6 @@ import { resolveJson } from "./options.js";
 
 export interface InitOptions {
   agent?: string[];
-  all?: boolean;
   yes?: boolean;
   skipAuth?: boolean;
   skipSkills?: boolean;
@@ -54,40 +56,50 @@ export async function run(
 ): Promise<void> {
   const json = resolveJson(cmd);
   const requested = [...new Set((opts.agent ?? []).map((name) => name.toLowerCase()))];
-  if (opts.all && requested.length) cmd.error("error: Use either --all or --agent, not both.");
   if (opts.skipAuth && opts.apiKey) {
     cmd.error("error: Use either --skip-auth or --api-key, not both.");
   }
+  const interactive = host.stdinIsTTY && host.stderrIsTTY && !json && !opts.yes;
+  if (interactive) intro("tvly init", { output });
 
-  const step = await installStep(opts, json, host);
-
-  const { agents, skills, workflows, mcp } = await selectAgents(requested, opts, json, host);
-  const result = emptyResult(skills ? agents : [], workflows ? agents : []);
-  result.install = step.install;
+  const cli = await installStep(opts, json, host);
+  const result = emptyResult();
+  result.install = cli.install;
   let mcpSetup: McpSetupResult | null = null;
 
   try {
-    const auth = await ensureAuth(opts, host, hooks);
+    const auth = await ensureAuth(opts, interactive, host, hooks);
     result.auth = auth;
     result.mode = auth.authenticated ? "authenticated" : "keyless";
     result.verification.auth = auth.authenticated;
   } catch (e) {
+    if (e instanceof ExitError) throw e;
     return fail(result, "auth", messageOf(e), 3, json);
   }
 
+  const picked = await plan(requested, opts, interactive, host);
+  const agents = picked.agents.join(", ");
   for (const stage of ["skills", "workflows"] as const) {
+    if (!picked[stage]) continue;
     const part = result[stage];
-    if (part.skipped) continue;
+    part.agents = picked.agents;
+    part.skipped = false;
+    const { label } = BUNDLES[stage];
     try {
-      const installed = await installAgentSkills(part.source, part.agents, host);
+      const installed = await step(interactive, `Installing ${label}`, `${label} → ${agents}`, () =>
+        installAgentSkills(part.source, picked.agents, host),
+      );
       part.restart_required = installed.restartRequired;
     } catch (e) {
       return fail(result, stage, messageOf(e), 1, json);
     }
   }
-  if (mcp) {
+  if (picked.mcp) {
+    const { label } = BUNDLES.mcp;
     try {
-      mcpSetup = await installMcp(agents, false, host);
+      mcpSetup = await step(interactive, `Adding the ${label}`, `${label} → ${agents}`, () =>
+        installMcp(picked.agents, false, host),
+      );
       result.mcp = { agents: mcpSetup.configured, skipped: mcpSetup.configured.length === 0 };
     } catch (e) {
       return fail(result, "mcp", messageOf(e), 1, json);
@@ -95,24 +107,99 @@ export async function run(
   }
 
   result.verification.cli = result.install.on_path || result.install.global;
-  if (!result.verification.cli && !opts.skipInstall && !step.failed) {
+  if (!result.verification.cli && !opts.skipInstall && !cli.failed) {
     return fail(result, "cli", "tvly is not available on PATH.", 1, json);
   }
 
   try {
-    result.verification.live_search = await verifyLiveSearch(host);
+    await step(interactive, "Verifying live search", "Live search verified", async () => {
+      if (!(await verifyLiveSearch(host))) {
+        throw new Error("Tavily search returned no result payload.");
+      }
+    });
+    result.verification.live_search = true;
   } catch (e) {
     return fail(result, "live_search", messageOf(e), 4, json);
   }
-  if (!result.verification.live_search) {
-    return fail(result, "live_search", "Tavily search returned no result payload.", 4, json);
-  }
 
-  if (step.failed) {
-    return fail(result, "install", INSTALL_INCOMPLETE, 1, json, step.pathNote);
+  if (cli.failed) {
+    return fail(result, "install", INSTALL_INCOMPLETE, 1, json, cli.pathNote);
   }
   result.ok = true;
-  printResult(result, json, step.pathNote, mcpSetup);
+  if (interactive) outro("Setup complete", { output });
+  printResult(result, json, cli.pathNote, mcpSetup);
+}
+
+/** Prompts and spinners draw on stderr; stdout stays for the summary and --json. */
+const output = process.stderr;
+
+type Bundle = "skills" | "workflows" | "mcp";
+
+const BUNDLES: Record<Bundle, Choice<Bundle>> = {
+  skills: { value: "skills", label: "Tavily skills", hint: "search, extract, crawl, research" },
+  workflows: { value: "workflows", label: "Official workflows" },
+  mcp: { value: "mcp", label: "MCP server", hint: "hosted, signs in with OAuth" },
+};
+
+/**
+ * Run `fn` under a spinner when interactive: `label` while it runs, `done` after. The CLI's own
+ * spinner redraws one line in place; clack's erases to the end of the screen on every frame,
+ * which flickers. A failure is reported once, by the summary.
+ */
+async function step<T>(
+  interactive: boolean,
+  label: string,
+  done: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const value = await withSpinner(label, interactive, fn);
+  if (interactive) log.success(done, { output });
+  return value;
+}
+
+/**
+ * Which agents get which bundles. Defaults (taken by --yes, non-TTY runs, and pre-checked in the
+ * pickers): every detected agent, or the --agent list; skills and MCP, not workflows.
+ * --skip-skills leaves coding agents alone entirely: no skills, workflows, or MCP.
+ */
+async function plan(
+  requested: string[],
+  opts: InitOptions,
+  interactive: boolean,
+  host: Host,
+): Promise<{ agents: string[]; skills: boolean; workflows: boolean; mcp: boolean }> {
+  const none = { agents: [], skills: false, workflows: false, mcp: false };
+  if (opts.skipSkills) return none;
+  const candidates = requested.length ? requested : detectAgents(host);
+  if (!candidates.length) {
+    if (interactive) {
+      log.warn("No coding agents found. Skills and MCP need Claude Code, Cursor, or Codex.", {
+        output,
+      });
+    }
+    return none;
+  }
+  const agents =
+    interactive && !requested.length
+      ? await host.prompt.multiselect(
+          "Which agents do you want to install to?",
+          candidates.map((a) => ({ value: a, label: a })),
+          candidates,
+        )
+      : candidates;
+  if (!agents.length) return none;
+
+  const choices = [BUNDLES.skills, ...(opts.skipWorkflows ? [] : [BUNDLES.workflows]), BUNDLES.mcp];
+  const defaults = choices.map((c) => c.value).filter((v) => v !== "workflows");
+  const bundles = interactive
+    ? await host.prompt.multiselect("What should I install?", choices, defaults)
+    : defaults;
+  return {
+    agents,
+    skills: bundles.includes("skills"),
+    workflows: bundles.includes("workflows"),
+    mcp: bundles.includes("mcp"),
+  };
 }
 
 const INSTALL_INCOMPLETE =
@@ -134,8 +221,8 @@ async function installStep(opts: InitOptions, json: boolean, host: Host): Promis
   };
   if (opts.skipInstall || step.install.on_path) return step;
 
-  const interactive = !json && !opts.yes && host.stdinIsTTY;
-  if (interactive && !(await host.confirm("Install tvly globally?"))) return step;
+  const interactive = !json && !opts.yes && host.stdinIsTTY && host.stderrIsTTY;
+  if (interactive && !(await host.prompt.confirm("Install tvly globally?"))) return step;
 
   const manager = detectPackageManager(host);
   step.install.manager = manager;
@@ -185,7 +272,7 @@ async function fixPath(
     const rc = rcFileForShell(host.env.SHELL ?? "", host.platform);
     const line = rc.includes("fish") ? `fish_add_path ${bin}` : `export PATH="${bin}:$PATH"`;
     const question = `Add ${bin} to PATH in ${rc}?`;
-    if (interactive && (await host.confirm(question))) {
+    if (interactive && (await host.prompt.confirm(question))) {
       const file = path.join(host.home, rc.slice(2));
       if (!existsSync(file) || !readFileSync(file, "utf8").includes(line)) {
         mkdirSync(path.dirname(file), { recursive: true });
@@ -203,36 +290,9 @@ async function fixPath(
   return null;
 }
 
-async function selectAgents(
-  requested: string[],
-  opts: InitOptions,
-  json: boolean,
-  host: Host,
-): Promise<{ agents: string[]; skills: boolean; workflows: boolean; mcp: boolean }> {
-  const agents: string[] = requested.length ? requested : detectAgents(host);
-
-  const interactive = agents.length > 0 && !opts.yes && !json && host.stdinIsTTY;
-  const ask = interactive && !requested.length && !opts.all;
-  const skills =
-    !opts.skipSkills &&
-    (!ask ||
-      (await host.confirm(`Install Tavily skills for detected agents (${agents.join(", ")})?`)));
-  const workflows =
-    !opts.skipSkills &&
-    !opts.skipWorkflows &&
-    (!ask || (await host.confirm(`Install the Tavily official workflows (${WORKFLOWS_REPO})?`)));
-  // MCP is opt-in: only an explicit yes at the prompt configures it.
-  const mcp =
-    interactive &&
-    (await host.confirm(
-      `Add the Tavily MCP server to ${agents.join(", ")} (hosted, signs in with OAuth)?`,
-      false,
-    ));
-  return { agents, skills, workflows, mcp };
-}
-
 async function ensureAuth(
   opts: InitOptions,
+  interactive: boolean,
   host: Host,
   hooks: LoginHooks,
 ): Promise<{ authenticated: boolean; method: string }> {
@@ -240,6 +300,24 @@ async function ensureAuth(
   const key = await getApiKey(host);
   if (key) return { authenticated: true, method: authMethod(key, host) };
   if (opts.skipAuth) return { authenticated: false, method: "none" };
+
+  // --browser / --no-browser already chose browser login, so only ask when neither was given.
+  if (interactive && opts.browser === undefined) {
+    const method = await host.prompt.select(
+      "How do you want to sign in?",
+      [
+        { value: "browser", label: "Browser login", hint: "recommended" },
+        { value: "key", label: "Paste an API key" },
+        { value: "keyless", label: "Continue without a key", hint: "rate-limited" },
+      ],
+      "browser",
+    );
+    if (method === "key") {
+      await saveApiKey((await host.prompt.password("API key")).trim(), host);
+      return { authenticated: true, method: "api_key" };
+    }
+    if (method === "keyless") return { authenticated: false, method: "none" };
+  }
 
   if (opts.browser === undefined && !host.stdinIsTTY) {
     throw new Error(
@@ -264,24 +342,14 @@ async function verifyLiveSearch(host: Host): Promise<boolean> {
   return Array.isArray((response as { results?: unknown } | null)?.results);
 }
 
-function emptyResult(skillsAgents: string[], workflowsAgents: string[]): InitResult {
+function emptyResult(): InitResult {
   return {
     ok: false,
     version: VERSION,
     mode: "unknown",
     auth: { authenticated: false, method: "none" },
-    skills: {
-      source: SKILLS_REPO,
-      agents: skillsAgents,
-      restart_required: false,
-      skipped: skillsAgents.length === 0,
-    },
-    workflows: {
-      source: WORKFLOWS_REPO,
-      agents: workflowsAgents,
-      restart_required: false,
-      skipped: workflowsAgents.length === 0,
-    },
+    skills: { source: SKILLS_REPO, agents: [], restart_required: false, skipped: true },
+    workflows: { source: WORKFLOWS_REPO, agents: [], restart_required: false, skipped: true },
     mcp: { agents: [], skipped: true },
     verification: { cli: false, auth: false, live_search: false },
     install: { global: false, manager: null, on_path: false, path_updated: false },
@@ -357,6 +425,7 @@ function printResult(
   out(`    ${colors.green('tvly search "latest AI news"')}`);
   out(`    ${colors.green("tvly extract https://example.com")}`);
   out(`    ${colors.green('tvly research "your topic"')}`);
+  out(`    Or ask your agent: "search for the latest AI news"`);
   if (result.mcp.skipped) {
     out();
     out("  Add the hosted Tavily MCP server to your agents:");

@@ -1,4 +1,4 @@
-import type { spawnSync } from "node:child_process";
+import type { ChildProcess, ExecFileException, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -11,18 +11,84 @@ type Spawned = ReturnType<Spawn>;
 const spawned = (over: Partial<Spawned>): Spawned =>
   ({ status: 0, stdout: "", stderr: "", signal: null, ...over }) as Spawned;
 
-function make(platform: NodeJS.Platform, exists = false, reply: Partial<Spawned> = {}) {
+/** What a fake execFile hands its callback. */
+interface AsyncReply {
+  error?: ExecFileException | null;
+  stdout?: string;
+  stderr?: string;
+}
+
+function make(
+  platform: NodeJS.Platform,
+  exists = false,
+  reply: Partial<Spawned> = {},
+  asyncReply: AsyncReply = {},
+) {
   const spawn = vi.fn(() => spawned(reply)) as unknown as Spawn;
+  const execFile = vi.fn((_file, _args, _opts, callback) => {
+    callback(asyncReply.error ?? null, asyncReply.stdout ?? "", asyncReply.stderr ?? "");
+    return { stdin: { end: () => {} } } as unknown as ChildProcess;
+  }) as Parameters<typeof createExec>[0]["execFile"];
   const exec = createExec({
     spawn,
+    execFile,
     exists: () => exists,
     env: {},
     platform,
     execPath: platform === "win32" ? "C:\\node\\node.exe" : "/usr/bin/node",
   });
   const lastCall = () => (spawn as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[];
-  return { exec, lastCall };
+  const lastAsyncCall = () => (execFile as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[];
+  return { exec, lastCall, lastAsyncCall };
 }
+
+describe("runAsync", () => {
+  test("returns the same shape as run for a success, with the same settings", async () => {
+    const out = { stdout: "out\n", stderr: "warn\n" };
+    const { exec, lastAsyncCall } = make("linux", false, out, out);
+    const r = await exec.runAsync("/usr/bin/npx", ["skills"], { timeoutMs: 15_000 });
+    expect(r).toEqual(exec.run("/usr/bin/npx", ["skills"], { timeoutMs: 15_000 }));
+    expect(r).toEqual({ ok: true, stdout: "out\n", stderr: "warn\n", failure: null });
+    expect(lastAsyncCall().slice(0, 3)).toEqual([
+      "/usr/bin/npx",
+      ["skills"],
+      {
+        encoding: "utf8",
+        timeout: 15_000,
+        maxBuffer: 16 * 1024 * 1024,
+        windowsHide: true,
+        shell: false,
+      },
+    ]);
+  });
+
+  test.each([
+    [
+      "a nonzero exit",
+      { status: 1, stdout: "x", stderr: "a\nError: boom\n" },
+      {
+        error: Object.assign(new Error("Command failed"), { code: 1 }),
+        stdout: "x",
+        stderr: "a\nError: boom\n",
+      },
+    ],
+    [
+      "a spawn error",
+      { error: new Error("spawn npx ENOENT") },
+      { error: Object.assign(new Error("spawn npx ENOENT"), { code: "ENOENT" }) },
+    ],
+    [
+      "a timeout",
+      { error: Object.assign(new Error("x"), { code: "ETIMEDOUT" }) },
+      { error: Object.assign(new Error("x"), { killed: true, signal: "SIGTERM" as const }) },
+    ],
+  ])("returns the same shape as run for %s", async (_name, reply, asyncReply) => {
+    const { exec } = make("linux", false, reply as Partial<Spawned>, asyncReply as AsyncReply);
+    const r = await exec.runAsync("/usr/bin/npx", [], { timeoutMs: 1 });
+    expect(r.ok).toBe(false);
+    expect(r).toEqual(exec.run("/usr/bin/npx", [], { timeoutMs: 1 }));
+  });
+});
 
 describe("run", () => {
   test("captures output with the shared spawn settings", () => {
