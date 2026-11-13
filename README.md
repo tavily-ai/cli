@@ -1,536 +1,228 @@
 # Tavily CLI
 
-CLI and agent tools for the [Tavily API](https://docs.tavily.com) — search, extract, crawl, map, and research from the command line.
+`tvly` runs [Tavily](https://docs.tavily.com) search, extract, crawl, map, and research from the terminal, and sets up Tavily skills and the MCP server for Claude Code, Codex, and Cursor. It is built on the official JavaScript SDK, [`@tavily/core`](https://www.npmjs.com/package/@tavily/core), and the `tvly search` flags follow the SDK's parameter catalog.
 
-> **Note:** This package provides the `tvly` command-line tool. It is built on the official
-> JavaScript SDK, [`@tavily/core`](https://www.npmjs.com/package/@tavily/core), and the
-> `tvly search` flags track the SDK's parameter catalog.
+- Rich output in a terminal, plain text when piped or run by an agent, and `--json` everywhere.
+- Search and extract work without an account, within a fair-use rate limit.
+- An interactive shell when run with no arguments.
+- Self-update through the package manager that installed it.
 
-## Features
-
-- **One-Command Setup** — Authenticate, install Tavily skills for supported agents, and verify a live search
-- **Interactive REPL** — Run `tvly` with no arguments for a chat-like shell experience
-- **CLI for Humans & AI Agents** — Rich-formatted output in a terminal, plain text when piped or run by an agent, and `--json` for structured output
-- **Web Search** — LLM-optimized search with domain/date filtering and relevance scoring
-- **Content Extraction** — Extract clean markdown from any URL
-- **Website Crawling** — Crawl sites with depth/breadth control and path filtering
-- **URL Discovery** — Map all URLs on a site without content extraction
-- **Deep Research** — AI-powered research with citations and structured output
-- **Self-Update** — Check for and install CLI updates through the original package manager
-
-## Installation
+## Install
 
 ```bash
 npx @tavily/cli init
 ```
 
-This installs `tvly` globally, asks how to sign in, which detected agents (Claude Code, Codex, Cursor) to set up, and what to install for them (Tavily skills, the official workflows from `tavily-ai/official-workflows`, the hosted MCP server), then verifies a live search. Add `--yes` to accept the defaults without prompts, or `--skip-install` to leave `tvly` uninstalled.
+This installs `tvly` globally, signs you in, sets up your coding agents, and verifies a live search. Requires Node.js 20.1 or later.
 
-Requires **Node.js 20.1+**.
-
-### Install globally
-
-Choose the package manager you use:
+To install without running setup, use your package manager and run `tvly init` afterwards:
 
 ```bash
-# npm
 npm install -g @tavily/cli
-
-# pnpm
 pnpm add -g @tavily/cli
-
-# yarn
 yarn global add @tavily/cli
-
-# bun
 bun add -g @tavily/cli
-
-# Run without installing
-npx @tavily/cli search "latest AI trends"
 ```
 
-Then run `tvly init` to complete setup.
-
-### From source
-
-```bash
-git clone https://github.com/tavily-ai/cli.git
-cd cli
-npm install
-npm run build
-npm link
-```
-
-### Updating
-
-```bash
-# Check without changing the installation
-tvly update --check
-
-# Update through npm, pnpm, yarn, or bun, whichever installed it
-tvly update
-```
-
-Source (`npm link`) and direct-URL installations are detected and must be updated from their original source.
-
-The CLI also checks npm for a newer release at most once a day and prints a one-line notice on
-stderr when one exists. It stays silent under `--json`, when stderr is not a terminal, when run via
-npx, or when `CI` or `NO_UPDATE_NOTIFIER` is set. The check's state lives in
-`~/.tavily/update-check.json`.
-
-### Shell installer
+The shell installer does the same on macOS and Linux, and starts `tvly init` when it runs in an interactive terminal:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/tavily-ai/cli/main/install.sh | sh
 ```
 
-On a fresh interactive desktop installation, the installer starts `tvly init`
-to guide authentication, agent detection, skill installation, and verification.
-In CI, SSH/headless, and other non-interactive environments, run `tvly init`
-separately with the [appropriate setup options](#non-interactive-mode-for-ai-agents--scripts).
+To work on the CLI itself, clone the repo, then run `npm install`, `npm run build`, and `npm link`.
 
-## Quick Start
+## Setup
 
-### Initialize Tavily
+`tvly init` walks through four steps:
 
-Setup starts from `npx @tavily/cli init`. After a package-manager, source, or
-non-interactive install, run:
+1. **Global install.** If `tvly` is not on your PATH, it is installed with the package manager that ran `init`. If the install directory is not on your PATH either, `init` offers to add it to your shell profile.
+2. **How do you want to sign in?** Browser login, paste an API key, or continue without a key. An existing credential is reused.
+3. **Which agents do you want to install to?** Every detected agent is pre-checked. `--agent` picks the agents and skips the question.
+4. **What should I install?** Tavily skills and the hosted MCP server are checked by default; the official workflows from `tavily-ai/official-workflows` are not.
 
-```bash
-tvly init
-tvly search "latest AI trends"
-```
-
-`tvly init` guides you through:
-
-1. **Global install:** if `tvly` is not on your PATH, install it globally with the package manager that ran `init` (npm, pnpm, yarn, or bun). If the install directory is not on your PATH, `init` offers to add it to your shell profile, or prints the line to add yourself.
-2. **How do you want to sign in?** Reuse an existing credential, or pick browser login (the default), paste an API key, or continue without a key (rate-limited).
-3. **Which agents do you want to install to?** Every detected agent (Claude Code, Codex, Cursor) is pre-checked; press Enter to accept. `--agent` picks the agents and skips this question.
-4. **What should I install?** Tavily skills and the hosted Tavily MCP server are checked; the official workflows from `tavily-ai/official-workflows` are not. `tvly setup mcp` adds the MCP server later.
-5. **Verification:** check the CLI, then run a live search.
-
-`--yes`, `--json`, and runs without a TTY ask nothing and take the defaults: every detected agent (or the `--agent` list), with skills and the MCP server.
-
-Skills are installed with the [skills.sh CLI](https://skills.sh)
-(`npx skills add tavily-ai/skills`), and the workflows the same way
-(`npx skills add tavily-ai/official-workflows`), and the MCP server is added with
-`npx add-mcp`, so all three need `npx` on your PATH. Without it, use `--skip-skills`,
-which leaves your coding agents alone: no skills, workflows, or MCP server. `--skip-workflows` skips only the workflows. Restart your agent after new skills are installed.
+It then verifies the CLI with a live search. Rerunning `tvly init` updates installed skills to the latest published version.
 
 ```bash
-# Set up one or more supported agents
-tvly init --agent codex
-tvly init --agent claude-code --agent cursor
-
-# Accept every default without prompting
-tvly init --yes
-
-# Authenticate with an API key instead of OAuth
-tvly init --api-key tvly-YOUR_KEY
-
-# Install skills and verify keyless search if no credential is configured
-tvly init --skip-auth
-
-# Authenticate and verify the CLI without touching coding agents
-tvly init --skip-skills
+tvly init                                   # prompts for everything
+tvly init --yes                             # accept every default
+tvly init --agent codex                     # one agent, no agent question
+tvly init --api-key tvly-YOUR_KEY           # API key instead of browser login
+tvly init --skip-auth                       # keyless setup when no credential exists
+tvly init --skip-skills                     # sign in and verify, leave agents alone
 ```
 
-Skills are installed in `~/.agents/skills`, which Codex and Cursor load
-directly; Claude Code gets links in `~/.claude/skills`. If no supported agent
-is detected, setup skips the skills.
-Rerunning `tvly init` updates existing skills to the latest published version.
-You can also run `npx skills update` at any time.
+`--yes`, `--json`, and runs without a terminal ask nothing and take the defaults: every detected agent, with skills and the MCP server.
 
-### Try search and extract without signing in
+Skills are installed with the [skills.sh CLI](https://skills.sh) into `~/.agents/skills`, which Codex and Cursor read directly; Claude Code gets links in `~/.claude/skills`. The MCP server is added with `npx add-mcp`. Both need `npx` on your PATH. Restart your agent after setup.
 
-You can skip setup and run `tvly search` or `tvly extract` immediately after
-installation. When no credential is configured, these commands use keyless
-access with a fair-use rate-limit cap.
+### Signing in
+
+`tvly login` manages credentials without the rest of setup:
+
+```bash
+tvly login                          # browser login
+tvly login --no-browser             # print the login URL instead of opening it
+tvly login --api-key tvly-YOUR_KEY  # store an API key
+tvly auth                           # show authentication status
+tvly logout                         # revoke tokens and clear stored credentials
+```
+
+`TAVILY_API_KEY` in the environment takes priority over stored credentials, so use it for CI and SSH sessions. `--no-browser` still waits for a callback on `127.0.0.1`, so over SSH either forward the port or use an API key.
+
+Browser login goes through Tavily's MCP endpoint, which rejects some search, crawl, and research options ([details](https://github.com/tavily-ai/tavily-cli/issues/24)). Use an API key for the full option set.
+
+## Usage
+
+Search and extract work right after installation, with no sign-in, until a fair-use cap is reached. Crawl, map, and research require a credential.
 
 ```bash
 tvly search "latest AI trends"
-tvly extract https://example.com
-```
-
-If you reach the cap, the CLI prints continuation options. Run `tvly login`
-to authenticate, then retry your command. `crawl`, `map`, and `research`
-require authentication.
-
-### Manage authentication
-
-Use `tvly login` when you only want to manage authentication without running
-the full setup and agent-skill installation:
-
-```bash
-# Browser OAuth
-tvly login
-
-# Print the OAuth URL and wait for authorization
-tvly login --no-browser
-
-# Or set API key directly
-tvly login --api-key tvly-YOUR_KEY
-
-# Or use environment variable
-export TAVILY_API_KEY=tvly-YOUR_KEY
-
-# Check auth status
-tvly auth
-
-# Revoke stored OAuth tokens and clear saved credentials
-tvly logout
-```
-
-`--no-browser` is also available on `tvly init`. It prints the login URL but
-still waits for a callback to `127.0.0.1` on the machine running the CLI.
-For SSH sessions, arrange port forwarding or use an API key; for CI, supply
-`TAVILY_API_KEY` through your secret manager. `tvly logout` cannot unset an
-environment variable, so unset `TAVILY_API_KEY` separately if needed.
-
-For the full API option set, use API-key authentication. Browser OAuth uses
-Tavily's MCP endpoint, where some CLI options and research operations have
-[known compatibility gaps](https://github.com/tavily-ai/tavily-cli/issues/24).
-
-## Examples
-
-### Interactive Mode
-
-```bash
-# Launch the interactive REPL
-tvly
-```
-
-This opens a chat-like shell where you can run commands without the `tvly` prefix:
-
-```
-❯  search "latest AI trends"
-❯  extract https://example.com
-❯  help
-```
-
-### Search the Web
-
-```bash
-# Basic search
-tvly search "latest AI trends"
-
-# Advanced search with filters
 tvly search "quantum computing" --depth advanced --max-results 10 --time-range week
-
-# Search specific domains
 tvly search "SEC filings for Apple" --include-domains sec.gov,reuters.com
+tvly search "Rust 2024 edition" "Rust 1.85 release notes"   # up to 5 queries, run in parallel
 
-# Several queries at once, run in parallel with the same options
-tvly search "Rust 2024 edition release date" "Rust 1.85 release notes" --depth advanced
-
-# Longer snippets (0 prints each result's content whole)
-tvly search "AI news" --max-chars 1500
-
-# JSON output
-tvly search "AI news" --json
-
-# Set client_name for attribution
-tvly search "latest AI news" --client-name x
-```
-
-### Extract Content from URLs
-
-```bash
-# Extract a single URL
 tvly extract https://example.com/article
-
-# Extract multiple URLs with a focus query
 tvly extract https://example.com https://other.com --query "pricing information"
 
-# Advanced extraction for JS-heavy pages
-tvly extract https://spa-app.com --extract-depth advanced
-```
-
-### Crawl a Website
-
-```bash
-# Basic crawl
-tvly crawl https://docs.example.com
-
-# Deep crawl with filters
 tvly crawl https://docs.example.com --max-depth 2 --limit 100 --select-paths "/api/.*,/guides/.*"
+tvly crawl https://docs.example.com --output-dir ./docs      # one Markdown file per page
 
-# Semantic focus with per-page chunks (API-key authentication)
-tvly crawl https://docs.example.com --instructions "Find authentication docs" --chunks-per-source 3
-
-# Save pages as markdown files
-tvly crawl https://docs.example.com --output-dir ./docs
-```
-
-### Map URLs
-
-```bash
-# Discover all URLs on a site
-tvly map https://example.com
-
-# Filter by path
 tvly map https://example.com --select-paths "/blog/.*" --limit 500
-```
 
-### Deep Research
-
-Use API-key authentication for streaming, structured output, and async
-research. Replace `REQUEST_ID` with the ID returned by your research request.
-
-```bash
-# Run research and wait for results
 tvly research "Competitive landscape of AI code assistants"
-
-# Use pro model for comprehensive analysis
-tvly research "Electric vehicle market analysis" --model pro
-
-# Stream results in real-time
-tvly research "AI market trends" --stream
-
-# Async: start and poll separately
-tvly research "topic" --no-wait --json        # returns request_id
-tvly research status REQUEST_ID --json        # check status
-tvly research poll REQUEST_ID --json          # wait and get result
-
-# Structured output
-tvly research "AI market size" --output-schema schema.json --json
+tvly research "EV market analysis" --model pro --stream
+tvly research "topic" --no-wait --json       # returns a request_id
+tvly research poll REQUEST_ID --json
 ```
 
-### Output in Pipes and Agent Shells
+Running `tvly` with no arguments opens a shell where commands are typed without the `tvly` prefix.
 
-When stdout is not a terminal, such as in a pipe, a redirect or a coding agent's
-shell, commands print plain text with no styling or line wrapping:
+### Output
 
-- `search` prints each result's title, full URL and the first 600 characters of
-  its content on one line. `--max-chars` changes the length, and `0` prints the
-  content whole. Several queries in one command share the 600 characters.
-- `extract` and `crawl` print each page in full, as `# <url>` followed by its
-  content, with links kept.
-- `map` prints one URL per line, and `research` prints the report followed by
-  its sources.
+In a terminal, results are formatted and wrapped. When stdout is a pipe, a file, or an agent's shell, output is plain text: `search` prints each result's title, URL, and the first 600 characters of content on one line (`--max-chars` changes the length, `0` prints everything); `extract` and `crawl` print each page in full under a `# <url>` heading; `map` prints one URL per line; `research` prints the report and its sources. `--json` prints the API response unchanged.
 
-`--json` output is unchanged.
-
-### Save Results
-
-`--output` writes the structured JSON response, regardless of the filename
-extension, and creates the folder if it doesn't exist. With no value, `-o`
-saves under `.tavily/` with a generated name, such as
-`.tavily/search-ai-news-142310-3f9a1c.json`, and prints the path. A new `.tavily/`
-folder gets its own `.gitignore`, so saved results stay out of git. Nothing is
-saved without `-o`. When stdout is not
-a terminal, `search --output` still prints the results, so you can skim them and
-read the saved file for more. For extraction, `--format markdown` controls the
-content inside that response; it does not turn the output file into plain
-Markdown.
+`-o` / `--output` saves the full JSON response. With no value it writes under `.tavily/` with a generated name and prints the path; a new `.tavily/` folder gets its own `.gitignore`. `crawl --output-dir` saves each page as a Markdown file instead.
 
 ```bash
 tvly search "AI news" -o
 tvly search "AI news" --output results/ai-news.json
 tvly extract https://example.com --format markdown --output extracted.json
-
-# Save individual crawled pages as Markdown files
-tvly crawl https://docs.example.com --output-dir ./docs
 ```
 
-## CLI Overview
+### Scripts and agents
 
-```
-tvly
-├── (no command)                # Interactive REPL
-├── init                        # Guided auth, agent skills, and verification
-├── login                       # Authenticate (OAuth or API key)
-├── logout                      # Clear stored credentials
-├── auth                        # Check authentication status
-├── search <query>              # Web search
-├── extract <urls...>           # Extract content from URLs
-├── crawl <url>                 # Crawl a website
-├── map <url>                   # Discover URLs (no content)
-├── update                      # Check for or install CLI updates
-├── set-default                 # Disable built-in web search in Claude Code/Codex
-├── unset-default               # Restore built-in web search in Claude Code/Codex
-├── setup
-│   └── mcp                     # Add the hosted Tavily MCP server to Claude Code/Codex/Cursor
-├── research <query>            # Deep research (async)
-│   ├── run <query>             # Start a research task (same as above)
-│   ├── status <id>             # Check task status
-│   └── poll <id>               # Poll until completion
-```
-
-## Non-Interactive Mode (for AI Agents & Scripts)
-
-Use `--json` for structured output. For unattended setup, provide a credential
-through `TAVILY_API_KEY` or choose `--skip-auth` for keyless search and extract.
-`--yes` accepts the default agents and bundles; it does not complete browser authentication.
+Every command accepts `--json`. A `-` argument reads the query from stdin.
 
 ```bash
-# With TAVILY_API_KEY already supplied by your environment
-tvly init --yes --json
-
-# Keyless setup for Codex when no credential is configured
-tvly init --agent codex --skip-auth --yes --json
-
-# Verify the CLI without installing skills (uses existing credentials, if any)
-tvly init --skip-auth --skip-skills --json
-```
-
-Setup JSON includes `ok`, `mode`, `install`, `auth`, `skills`, `workflows`, `mcp`, and
-`verification`. On failure, `error.stage` identifies the failed step. Setup always performs a
-live search, so it needs network access even with `--skip-skills`. Non-interactive setup adds
-the MCP server to the selected agents, as the interactive default does.
-
-```bash
-# Every command supports --json for structured output
-tvly search "query" --json
-tvly auth --json
-tvly extract https://example.com --json
-tvly update --check --json
-
-# Read input from stdin with "-"
 echo "What is the latest funding for Anthropic?" | tvly search - --json
-echo "Research question" | tvly research - --json
-
-# Async research: launch then poll separately
-tvly research "question" --no-wait --json        # returns request_id
-tvly research status REQUEST_ID --json           # check status
-tvly research poll REQUEST_ID --json             # wait and get result
-
-# Global options
-tvly --version         # show version
-tvly --status          # show version + auth status
-tvly --status --json   # structured status
+tvly init --yes --json                           # TAVILY_API_KEY supplied by the environment
+tvly init --agent codex --skip-auth --yes --json # keyless setup
+tvly --status --json                             # version and auth status
 ```
 
-### Exit Codes
+Setup JSON includes `ok`, `mode`, `install`, `auth`, `skills`, `workflows`, `mcp`, and `verification`; on failure, `error.stage` names the failed step. Setup always runs a live search, so it needs network access.
 
-| Code | Meaning |
-|------|---------|
+| Exit code | Meaning |
+|-----------|---------|
 | 0 | Success |
 | 1 | Local setup or update error |
-| 2 | Invalid input / usage error |
-| 3 | Authentication failure, keyless rate-limit cap, or handled API usage/plan limit |
+| 2 | Invalid input or usage error |
+| 3 | Authentication failure, keyless rate-limit cap, or API usage/plan limit |
 | 4 | API error, setup live-search failure, or update-check error |
 
 HTTP 401, 403, 429, and 432 exit 3 on every credential type.
 
-## Command Reference
+## Commands
+
+```
+tvly
+├── (no command)          Interactive shell
+├── init                  Install, sign in, set up agents, verify
+├── login                 Sign in with the browser or an API key
+├── logout                Clear stored credentials
+├── auth                  Show authentication status
+├── search <query...>     Web search
+├── extract <urls...>     Extract content from URLs
+├── crawl <url>           Crawl a website
+├── map <url>             Discover URLs without content
+├── research <query>      Deep research
+│   ├── status <id>       Check a research task
+│   └── poll <id>         Wait for a research task
+├── setup mcp             Add the hosted Tavily MCP server to an agent
+├── set-default           Disable built-in web search in Claude Code and Codex
+├── unset-default         Restore it
+└── update                Check for or install a newer release
+```
 
 ### `tvly init`
 
-Run first-time setup, install or update the Tavily skills (through
-`npx skills`), and verify the CLI with a live search.
-
 | Option | Description |
 |--------|-------------|
-| `--agent` | Install skills for `claude-code`, `codex`, or `cursor`; repeat to select more than one |
-| `--yes` | Accept every default without prompting (all detected agents; skills and MCP) |
-| `--skip-auth` | Skip login when no credential is configured; existing credentials are still used |
+| `--agent` | Set up `claude-code`, `codex`, or `cursor`; repeat for more than one |
+| `--yes` | Accept every default without prompting |
+| `--skip-auth` | Skip sign-in when no credential is configured |
 | `--skip-skills` | Leave coding agents alone: no skills, workflows, or MCP server |
-| `--skip-workflows` | Skip installing the official workflows from `tavily-ai/official-workflows` |
+| `--skip-workflows` | Skip the official workflows |
 | `--skip-install` | Skip the global `tvly` install |
-| `--api-key` | Authenticate with an API key instead of OAuth |
-| `--browser` / `--no-browser` | Open OAuth in a browser or print the URL; both require the local callback |
+| `--api-key` | Sign in with an API key |
+| `--browser` / `--no-browser` | Open the login page or print its URL |
 
-`--skip-auth` and `--api-key` cannot be combined. `--json` is a global flag
-accepted by every command; with `tvly init` it returns structured setup and
-verification results and takes the defaults without prompting, but does not
-skip authentication.
+`--skip-auth` and `--api-key` cannot be combined.
 
 ### `tvly setup mcp`
 
-Add the hosted Tavily MCP server (`https://mcp.tavily.com/mcp/`, named `tavily`)
-to Claude Code, Codex, and Cursor. The config always points at the hosted
-server; nothing runs locally. Claude Code and Cursor are written through
-`npx add-mcp`, Codex through `codex mcp add` when a key is used.
+Adds the hosted Tavily MCP server (`https://mcp.tavily.com/mcp/`, named `tavily`) to Claude Code, Codex, and Cursor. Nothing runs locally.
 
 ```bash
-# Every detected agent
-tvly setup mcp
-
-# One or more agents, or all three
-tvly setup mcp --agent codex
+tvly setup mcp                                   # every detected agent
 tvly setup mcp --agent claude-code --agent cursor
 tvly setup mcp --agent all
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--agent` | Configure `claude-code`, `codex`, `cursor`, or `all`; repeat to select more than one. Without it, the detected agents |
-| `--keyless` | Write the URL-only config so the agent signs in with OAuth, even when `TAVILY_API_KEY` is set |
+| `--agent` | `claude-code`, `codex`, `cursor`, or `all`; repeat for more than one |
+| `--keyless` | Write the URL-only config so the agent signs in with OAuth even when `TAVILY_API_KEY` is set |
 
-Two ways to authenticate, chosen from your environment:
+With `TAVILY_API_KEY` exported, the config references the variable (`${TAVILY_API_KEY}` for Claude Code, `${env:TAVILY_API_KEY}` for Cursor, `--bearer-token-env-var` for Codex) and the key itself is never written to disk. Without it, the agent opens a browser to sign in the first time it uses the server. A key stored by `tvly login` is not used for MCP. Agents that cannot be configured, such as Codex when `codex` is not on PATH, are skipped and listed; the command exits 1 only when nothing was configured.
 
-- **`TAVILY_API_KEY` exported:** the config holds a reference the agent expands
-  at runtime (`Bearer ${TAVILY_API_KEY}` for Claude Code,
-  `Bearer ${env:TAVILY_API_KEY}` for Cursor, `--bearer-token-env-var` for Codex).
-  The key itself is never stored in any agent config.
-- **No key, or `--keyless`:** the config holds the URL alone. The agent opens a
-  browser to sign in to Tavily the first time it uses the server.
-
-A key stored only by `tvly login` is not used for MCP; the agent reads the
-key from its own environment or signs in with OAuth. Agents that cannot be
-configured on this machine (for example Codex when `codex` is not on PATH)
-are skipped and listed; the command exits 1 only when nothing was configured.
-`--json` prints `ok`, `configured`, `skipped` (with reasons), and `auth`
-(`env` or `oauth`). Restart the agent after adding the server.
-
-### `tvly search`
+### `tvly search <query...>`
 
 | Option | Description |
 |--------|-------------|
-| `--depth` | Search strategy: `basic`, `advanced`, `fast`, or `ultra-fast` |
+| `--depth` | `basic`, `advanced`, `fast`, or `ultra-fast` |
 | `--max-results` | Result count limit |
-| `--topic` | `general`, `news`, `finance` |
-| `--time-range` | Relative date window: `year`, `month`, `week`, `day` (or `y`, `m`, `w`, `d`) |
-| `--start-date` | Start of the date window (YYYY-MM-DD) |
-| `--end-date` | End of the date window (YYYY-MM-DD) |
-| `--include-domains` | Domains to include or prefer |
-| `--exclude-domains` | Domains to omit |
-| `--country` | Country preference for results |
-| `--include-answer` | Request a generated answer: `basic` (default when given), `advanced`, `true`, `false` |
-| `--include-raw-content` | Return page content as `markdown` (default when given) or `text`, or disable it with `false` |
-| `--include-images` | Request images alongside text results |
-| `--include-image-descriptions` | Request descriptions for returned images |
+| `--topic` | `general`, `news`, or `finance` |
+| `--time-range` | `year`, `month`, `week`, or `day` (or `y`, `m`, `w`, `d`) |
+| `--start-date` / `--end-date` | Date window bounds (YYYY-MM-DD) |
+| `--include-domains` / `--exclude-domains` | Domains to prefer or omit |
+| `--include-domains-mode` | How `--include-domains` applies: `restrict` or `prefer` |
+| `--country` | Country preference |
+| `--language` | Preferred content language |
+| `--filter-by-language` | Restrict results to the requested language |
+| `--include-answer` | Generated answer: `basic`, `advanced`, `true`, or `false` |
+| `--include-raw-content` | Page content as `markdown` or `text`, or `false` |
+| `--include-images` / `--include-image-descriptions` | Images alongside results |
+| `--include-favicon` | Site icons |
+| `--include-published-date` | Detected publication dates |
+| `--filter-by-published-date` | Drop undated results and results outside the date window |
+| `--include-usage` | Credit usage details |
 | `--chunks-per-source` | Content chunks per source for advanced search |
 | `--auto-parameters` | Let Tavily choose search settings from the query |
 | `--cache-fallback` | Allow cached content when live fetching fails |
-| `--days` | Lookback in days for news searches |
-| `--exact-match` | Require exact matches for quoted phrases in the query |
+| `--max-age-hours` | Maximum acceptable cache age |
 | `--fetch-timeout` | Live-fetch time budget in seconds |
-| `--filter-by-language` | Restrict results to the requested language |
-| `--filter-by-published-date` | Exclude undated results and results outside the requested date window; also enables publication dates |
-| `--include-domains-mode` | How to apply `--include-domains`: `restrict` or `prefer` |
-| `--include-favicon` | Request site icons |
-| `--include-published-date` | Request detected publication dates |
-| `--include-usage` | Request credit usage details |
-| `--language` | Preferred content language |
-| `--max-age-hours` | Maximum acceptable cache age in hours |
-| `--safe-search` | Filter explicit content from results |
-| `--max-chars` | Characters of each result's content to print (default 600, shared across queries; `0` for all); `--json` and `-o` files keep it whole |
-| `-o` / `--output` | Save the full JSON response to file; with no value, under `.tavily/` |
-| `--client-name` | Set optional `client_name` for request attribution |
+| `--days` | Lookback in days for news searches |
+| `--exact-match` | Require exact matches for quoted phrases |
+| `--safe-search` | Filter explicit content |
+| `--max-chars` | Characters of content printed per result (default 600, `0` for all) |
+| `-o` / `--output` | Save the full JSON response |
+| `--client-name` | `client_name` for request attribution |
 
-`tvly search` accepts up to 5 queries and runs them in parallel with the same
-options. Each query's results print under its own `=== [i/n] <query>` header;
-with `--json`, the output is a list of responses in query order. A query that
-fails reports its error without stopping the others.
+Up to 5 queries run in parallel with the same options. Each query's results print under a `=== [i/n] <query>` header; with `--json`, the output is a list in query order. A failing query reports its error without stopping the others.
 
-### `tvly update`
-
-Check the npm registry for the latest Tavily CLI release and update through the
-package manager responsible for the active installation.
-
-```bash
-tvly update --check
-tvly update
-tvly update --check --json
-```
-
-`--check` is read-only. Source/direct-URL installations are reported without
-being modified. JSON output includes `can_update` and `blocked_reason` so
-automation can distinguish an available release from a supported self-update.
-
-### `tvly extract`
+### `tvly extract <urls...>`
 
 | Option | Description |
 |--------|-------------|
@@ -540,119 +232,93 @@ automation can distinguish an available release from a supported self-update.
 | `--format` | `markdown` or `text` |
 | `--include-images` | Include image URLs |
 | `--timeout` | Max wait (1-60 seconds) |
-| `-o` / `--output` | Save output to file |
-| `--client-name` | Set optional `client_name` for request attribution |
+| `-o` / `--output` | Save the full JSON response |
+| `--client-name` | `client_name` for request attribution |
 
-### `tvly crawl`
+### `tvly crawl <url>` and `tvly map <url>`
 
 | Option | Description |
 |--------|-------------|
-| `--max-depth` | Levels deep (1-5, default: 1) |
-| `--max-breadth` | Links per page (default: 20) |
-| `--limit` | Total pages cap (default: 50) |
-| `--instructions` | Natural language guidance |
+| `--max-depth` | Levels deep (1-5, default 1) |
+| `--max-breadth` | Links per page (default 20) |
+| `--limit` | Total pages or URLs (default 50) |
+| `--instructions` | Natural-language guidance |
+| `--select-paths` / `--exclude-paths` | Regex patterns for paths |
+| `--select-domains` / `--exclude-domains` | Regex patterns for domains |
+| `--allow-external` / `--no-external` | Follow or ignore links to other domains |
+| `--timeout` | Max wait (10-150 seconds) |
+| `-o` / `--output` | Save the full JSON response |
+| `--client-name` | `client_name` for request attribution |
+
+`crawl` only:
+
+| Option | Description |
+|--------|-------------|
 | `--chunks-per-source` | Chunks per page (1-5) |
 | `--extract-depth` | `basic` or `advanced` |
 | `--format` | `markdown` or `text` |
-| `--select-paths` | Regex patterns for paths to include |
-| `--exclude-paths` | Regex patterns for paths to exclude |
-| `--select-domains` | Regex for domains to include |
-| `--exclude-domains` | Regex for domains to exclude |
-| `--allow-external` / `--no-external` | Include or leave out external domain links |
 | `--include-images` | Include images |
-| `--timeout` | Max wait (10-150 seconds) |
-| `-o` / `--output` | Save the full JSON response to file; with no value, under `.tavily/` |
-| `--output-dir` | Save each page as .md file in directory |
-| `--client-name` | Set optional `client_name` for request attribution |
+| `--output-dir` | Save each page as a Markdown file in a directory |
 
-### `tvly map`
+### `tvly research <query>`
 
-| Option | Description |
-|--------|-------------|
-| `--max-depth` | Levels deep (1-5, default: 1) |
-| `--max-breadth` | Links per page (default: 20) |
-| `--limit` | Max URLs to discover (default: 50) |
-| `--instructions` | Natural language guidance |
-| `--select-paths` | Regex patterns for paths to include |
-| `--exclude-paths` | Regex patterns for paths to exclude |
-| `--select-domains` | Regex patterns for domains to include |
-| `--exclude-domains` | Regex patterns for domains to exclude |
-| `--allow-external` / `--no-external` | Include or leave out external domain links |
-| `--timeout` | Max wait (10-150 seconds) |
-| `-o` / `--output` | Save output to file |
-| `--client-name` | Set optional `client_name` for request attribution |
-
-### `tvly research <query>` / `tvly research run <query>`
+Streaming, structured output, and async research need an API key.
 
 | Option | Description |
 |--------|-------------|
 | `--model` | `mini`, `pro`, or `auto` (default) |
-| `--no-wait` | Return request_id immediately |
-| `--stream` | Stream results in real-time |
-| `--output-schema` | Path to JSON schema file |
-| `--citation-format` | `numbered`, `mla`, `apa`, `chicago` |
-| `--poll-interval` | Seconds between checks (default: 10) |
-| `--timeout` | Max wait seconds (default: 600) |
-| `-o` / `--output` | Save output to file |
-| `--client-name` | Set optional `client_name` for request attribution |
+| `--no-wait` | Return the request ID immediately |
+| `--stream` | Stream results as they arrive |
+| `--output-schema` | Path to a JSON schema for structured output |
+| `--citation-format` | `numbered`, `mla`, `apa`, or `chicago` |
+| `--poll-interval` | Seconds between status checks (default 10) |
+| `--timeout` | Max wait in seconds (default 600) |
+| `-o` / `--output` | Save the full JSON response |
+| `--client-name` | `client_name` for request attribution |
 
-### `tvly research status`
-
-Check research task status by request ID. Supports `--client-name`.
-
-### `tvly research poll`
-
-Poll until completion and return results. Same `--poll-interval`, `--timeout`, `-o`, and `--client-name` options as `run`.
+`tvly research status <id>` checks a task; `tvly research poll <id>` waits for it with the same `--poll-interval`, `--timeout`, and `-o` options.
 
 ### `tvly set-default` / `tvly unset-default`
 
-Make Tavily the default web tool for your coding agents by disabling their
-built-in web search. Without flags, you are prompted for each agent.
-`unset-default` undoes `set-default`, but doesn't restore values you had set
-yourself for these settings before running it.
+Makes Tavily the web tool your coding agents use by disabling their built-in web search. Without flags, you are asked per agent. `unset-default` reverses the change but does not restore values you had set yourself before.
 
 | Option | Description |
 |--------|-------------|
 | `--claude` | Add `WebSearch` and `WebFetch` to `permissions.deny` in `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR`) |
 | `--codex` | Set `web_search = "disabled"` in `~/.codex/config.toml` (or `$CODEX_HOME`) |
-| `--project` | Apply to the current directory instead: `.claude/settings.local.json` and `.codex/config.toml` (Codex reads project config only in trusted projects) |
+| `--project` | Apply to the current directory instead (`.claude/settings.local.json` and `.codex/config.toml`) |
+
+### `tvly update`
 
 ```bash
-tvly set-default --claude --codex
-tvly unset-default --codex
-tvly set-default --claude --project
+tvly update --check     # report without changing anything
+tvly update             # update through npm, pnpm, yarn, or bun, whichever installed it
 ```
 
-## Environment Variables
+Source and direct-URL installations are reported but not modified. JSON output includes `can_update` and `blocked_reason`.
+
+The CLI also checks for a newer release at most once a day and prints a one-line notice on stderr. It stays silent under `--json`, when stderr is not a terminal, when run through `npx`, or when `CI` or `NO_UPDATE_NOTIFIER` is set.
+
+## Environment variables
 
 | Variable | Description |
 |----------|-------------|
-| `TAVILY_API_KEY` | API key (highest priority, no login needed) |
-| `TAVILY_HUMAN_ID` | Optional identifier attached to every request for usage attribution |
-| `TAVILY_CLIENT_NAME` | Default for `--client-name` request attribution |
-| `TAVILY_API_BASE_URL` | Override the Tavily API base URL (also settable as `api_base_url` in the config file) |
+| `TAVILY_API_KEY` | API key; takes priority over stored credentials |
+| `TAVILY_API_BASE_URL` | Override the API base URL (also `api_base_url` in `~/.tavily/config.json`) |
+| `TAVILY_CLIENT_NAME` | Default for `--client-name` |
+| `TAVILY_HUMAN_ID` | Identifier attached to every request for usage attribution (also `human_id` in the config file) |
 | `TAVILY_PROJECT` | Project ID attached to requests |
 | `TAVILY_ORG_ID` | Organization ID attached to requests |
-| `TAVILY_HTTP_PROXY` / `TAVILY_HTTPS_PROXY` | Proxy URLs used for HTTP and HTTPS requests |
-| `NO_UPDATE_NOTIFIER` | Disable the once-a-day update notice (`CI` disables it too) |
+| `TAVILY_HTTP_PROXY` / `TAVILY_HTTPS_PROXY` | Proxy URLs for API calls made with an API key |
+| `NO_UPDATE_NOTIFIER` | Disable the daily update notice (`CI` disables it too) |
 
-`TAVILY_HTTP_PROXY` and `TAVILY_HTTPS_PROXY` apply to API calls made with an
-API key. Browser login, OAuth-credentialed commands, and `tvly update` use
-Node's `fetch`, which ignores proxy variables unless Node 24 or later is run
-with `NODE_USE_ENV_PROXY=1`.
-
-```bash
-# Via env var (highest priority)
-export TAVILY_HUMAN_ID=alice@example.com
-
-# Or persist it in the config file
-# (~/.tavily/config.json — set the "human_id" key)
-```
+Browser login, OAuth-credentialed commands, and `tvly update` use Node's `fetch`, which ignores proxy variables unless Node 24 or later runs with `NODE_USE_ENV_PROXY=1`.
 
 ## Related
 
-- [`@tavily/core`](https://www.npmjs.com/package/@tavily/core) — Official Tavily JavaScript SDK
-- [Tavily Docs](https://docs.tavily.com) — Full API documentation
+- [Tavily CLI docs](https://docs.tavily.com/documentation/tavily-cli)
+- [`@tavily/core`](https://www.npmjs.com/package/@tavily/core), the JavaScript SDK
+- [Tavily API reference](https://docs.tavily.com)
 
 ## License
 
