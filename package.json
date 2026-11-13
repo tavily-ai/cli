@@ -42,7 +42,7 @@
   "homepage": "https://tavily.com",
   "repository": {
     "type": "git",
-    "url": "https://github.com/tavily-ai/cli.git"
+    "url": "git+https://github.com/tavily-ai/cli.git"
   },
   "bugs": {
     "url": "https://github.com/tavily-ai/cli/issues"
