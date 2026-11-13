@@ -82,13 +82,13 @@ tvly search "quantum computing" --depth advanced --max-results 10 --time-range w
 tvly search "SEC filings for Apple" --include-domains sec.gov,reuters.com
 tvly search "Rust 2024 edition" "Rust 1.85 release notes"   # up to 5 queries, run in parallel
 
-tvly extract https://example.com/article
-tvly extract https://example.com https://other.com --query "pricing information"
+tvly extract https://docs.tavily.com/documentation/rate-limits
+tvly extract https://tavily.com/pricing https://docs.tavily.com/documentation/rate-limits --query "free tier limits"
 
-tvly crawl https://docs.example.com --max-depth 2 --limit 100 --select-paths "/api/.*,/guides/.*"
-tvly crawl https://docs.example.com --output-dir ./docs      # one Markdown file per page
+tvly crawl https://docs.tavily.com --max-depth 2 --limit 100 --select-paths "/documentation/api-reference/.*"
+tvly crawl https://docs.tavily.com --output-dir ./tavily-docs      # one Markdown file per page
 
-tvly map https://example.com --select-paths "/blog/.*" --limit 500
+tvly map https://tavily.com --select-paths "/blog/.*" --limit 500
 
 tvly research "Competitive landscape of AI code assistants"
 tvly research "EV market analysis" --model pro --stream
@@ -107,7 +107,7 @@ In a terminal, results are formatted and wrapped. When stdout is a pipe, a file,
 ```bash
 tvly search "AI news" -o
 tvly search "AI news" --output results/ai-news.json
-tvly extract https://example.com --format markdown --output extracted.json
+tvly extract https://tavily.com --format markdown --output extracted.json
 ```
 
 ### Scripts and agents
