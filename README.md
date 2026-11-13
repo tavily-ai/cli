@@ -41,6 +41,8 @@ curl -fsSL https://raw.githubusercontent.com/tavily-ai/cli/main/install.sh | sh
 
 It then verifies the CLI with a live search. Rerunning `tvly init` updates installed skills to the latest published version.
 
+If the deprecated Python `tavily-cli` is still on your PATH, `init` says so first and offers to remove it when `uv` or `pipx` installed it. `--yes` and non-interactive runs only print the warning.
+
 ```bash
 tvly init                                   # prompts for everything
 tvly init --yes                             # accept every default
