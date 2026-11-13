@@ -30,8 +30,6 @@ The shell installer does the same on macOS and Linux, and starts `tvly init` whe
 curl -fsSL https://raw.githubusercontent.com/tavily-ai/cli/main/install.sh | sh
 ```
 
-To work on the CLI itself, clone the repo, then run `npm install`, `npm run build`, and `npm link`.
-
 ## Setup
 
 `tvly init` walks through four steps:
