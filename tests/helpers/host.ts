@@ -38,6 +38,7 @@ export function fakeHost(over: Partial<Host> = {}): Host {
     platform: "linux",
     stdinIsTTY: false,
     stderrIsTTY: false,
+    readStdin: async () => "",
     now: () => NOW,
     fetch: () => {
       throw new Error("unexpected fetch");

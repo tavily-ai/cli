@@ -8,6 +8,7 @@ import {
   saveApiKey,
   saveOauthSession,
 } from "../core/config.js";
+import { resolveApiKeyOption } from "../core/key-input.js";
 import { looksHeadless, runBrowserLogin } from "../core/oauth.js";
 import { ExitError, OAuthError } from "../errors.js";
 import type { Host } from "../host.js";
@@ -23,7 +24,7 @@ export interface LoginHooks {
 }
 
 interface LoginOptions {
-  apiKey?: string;
+  apiKey?: string | boolean;
   browser?: boolean;
 }
 
@@ -40,8 +41,9 @@ export async function runLogin(
   const json = resolveJson(cmd);
   const configFile = configPaths(host.home).file;
 
-  if (opts.apiKey) {
-    await saveApiKey(opts.apiKey, host);
+  const apiKey = await resolveApiKeyOption(opts.apiKey, host, !json);
+  if (apiKey) {
+    await saveApiKey(apiKey, host);
     printLoginSuccess("API key", `Saved to ${configFile}`, json);
     return;
   }
