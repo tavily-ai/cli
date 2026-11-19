@@ -11,6 +11,7 @@ import {
   MANAGER_COMMANDS,
   MANAGER_RUNNERS,
 } from "../core/install-detect.js";
+import { resolveApiKeyOption } from "../core/key-input.js";
 import { findLegacyCli } from "../core/legacy-cli.js";
 import { installMcp, MCP_AUTH_NOTE, type McpSetupResult } from "../core/mcp-setup.js";
 import { looksHeadless, runBrowserLogin } from "../core/oauth.js";
@@ -32,7 +33,7 @@ export interface InitOptions {
   skipSkills?: boolean;
   skipWorkflows?: boolean;
   skipInstall?: boolean;
-  apiKey?: string;
+  apiKey?: string | boolean;
   browser?: boolean;
 }
 
@@ -70,7 +71,7 @@ export async function run(
   let mcpSetup: McpSetupResult | null = null;
 
   try {
-    const auth = await ensureAuth(opts, interactive, host, hooks);
+    const auth = await ensureAuth(opts, interactive, json, host, hooks);
     result.auth = auth;
     result.mode = auth.authenticated ? "authenticated" : "keyless";
     result.verification.auth = auth.authenticated;
@@ -335,10 +336,12 @@ async function fixPath(
 async function ensureAuth(
   opts: InitOptions,
   interactive: boolean,
+  json: boolean,
   host: Host,
   hooks: LoginHooks,
 ): Promise<{ authenticated: boolean; method: string }> {
-  if (opts.apiKey) await saveApiKey(opts.apiKey, host);
+  const apiKey = await resolveApiKeyOption(opts.apiKey, host, !json);
+  if (apiKey) await saveApiKey(apiKey, host);
   const key = await getApiKey(host);
   if (key) return { authenticated: true, method: authMethod(key, host) };
   if (opts.skipAuth) return { authenticated: false, method: "none" };

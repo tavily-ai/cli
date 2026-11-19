@@ -47,7 +47,7 @@ If the deprecated Python `tavily-cli` is still on your PATH, `init` says so firs
 tvly init                                   # prompts for everything
 tvly init --yes                             # accept every default
 tvly init --agent codex                     # one agent, no agent question
-tvly init --api-key tvly-YOUR_KEY           # API key instead of browser login
+tvly init --api-key                         # API key instead of browser login (asks for it)
 tvly init --skip-auth                       # keyless setup when no credential exists
 tvly init --skip-skills                     # sign in and verify, leave agents alone
 ```
@@ -63,12 +63,14 @@ Skills are installed with the [skills.sh CLI](https://skills.sh) into `~/.agents
 ```bash
 tvly login                          # browser login
 tvly login --no-browser             # print the login URL instead of opening it
-tvly login --api-key tvly-YOUR_KEY  # store an API key
+tvly login --api-key                # store an API key (asks for it, hidden)
 tvly auth                           # show authentication status
 tvly logout                         # revoke tokens and clear stored credentials
 ```
 
-`TAVILY_API_KEY` in the environment takes priority over stored credentials, so use it for CI and SSH sessions. `--no-browser` still waits for a callback on `127.0.0.1`, so over SSH either forward the port or use an API key.
+`TAVILY_API_KEY` in the environment takes priority over stored credentials, so use it for CI and SSH sessions.
+
+**Keep your key out of shell history.** `tvly login --api-key tvly-...` works, but a key typed on the command line is saved in your shell history and visible in the process list. Use `--api-key` with no value to paste it at a hidden prompt, pipe it in with `--api-key -` (for example `pass show tavily | tvly login --api-key -`), or set `TAVILY_API_KEY` and store nothing. A key saved by `tvly login` is written to `~/.tavily/config.json` (readable only by you). `--no-browser` still waits for a callback on `127.0.0.1`, so over SSH either forward the port or use an API key.
 
 Browser login goes through Tavily's MCP endpoint, which rejects some search, crawl, and research options ([details](https://github.com/tavily-ai/tavily-cli/issues/24)). Use an API key for the full option set.
 
@@ -165,7 +167,7 @@ tvly
 | `--skip-skills` | Leave coding agents alone: no skills, workflows, or MCP server |
 | `--skip-workflows` | Skip the official workflows |
 | `--skip-install` | Skip the global `tvly` install |
-| `--api-key` | Sign in with an API key |
+| `--api-key [key]` | Sign in with an API key. Without a value it asks for the key (hidden) or reads stdin; `-` always reads stdin |
 | `--browser` / `--no-browser` | Open the login page or print its URL |
 
 `--skip-auth` and `--api-key` cannot be combined.

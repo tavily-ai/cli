@@ -184,6 +184,31 @@ describe("login", () => {
     expect(readConfig(h)).toEqual({ api_key: "tvly-new" });
   });
 
+  test("--api-key with no value reads the key from stdin and saves it", async () => {
+    const h = host({ readStdin: async () => "tvly-piped\n" });
+    expect(await runProgram(["login", "--api-key"], h)).toBe(0);
+    expect(readConfig(h)).toEqual({ api_key: "tvly-piped" });
+    expect(visible(io.stderr())).not.toContain("shell history");
+  });
+
+  test("--api-key - reads stdin", async () => {
+    const h = host({ readStdin: async () => "tvly-dash" });
+    expect(await runProgram(["login", "--api-key", "-"], h)).toBe(0);
+    expect(readConfig(h)).toEqual({ api_key: "tvly-dash" });
+  });
+
+  test("a key on the command line still works and warns about shell history", async () => {
+    const h = host();
+    expect(await runProgram(["login", "--api-key", "tvly-literal"], h)).toBe(0);
+    expect(readConfig(h)).toEqual({ api_key: "tvly-literal" });
+    expect(visible(io.stderr())).toContain("shell history");
+  });
+
+  test("--json does not print the history warning", async () => {
+    expect(await runProgram(["--json", "login", "--api-key", "tvly-literal"], host())).toBe(0);
+    expect(visible(io.stderr())).not.toContain("shell history");
+  });
+
   test("oauth --json reports replacement revocation failure", async () => {
     writeConfig({ oauth: storedOauth });
     const h = host({ env: { DISPLAY: ":0" }, fetch: fetchWith(500) });

@@ -13,6 +13,8 @@ export interface Host {
   platform: NodeJS.Platform;
   stdinIsTTY: boolean;
   stderrIsTTY: boolean;
+  /** All of stdin as text (for a key piped in, which keeps it out of argv and shell history). */
+  readStdin(): Promise<string>;
   now(): number;
   fetch: typeof fetch;
   exec: Exec;
@@ -48,6 +50,12 @@ export function realHost(): Host {
     platform: process.platform,
     stdinIsTTY: process.stdin.isTTY === true,
     stderrIsTTY: process.stderr.isTTY === true,
+    readStdin: async () => {
+      process.stdin.setEncoding("utf8");
+      let text = "";
+      for await (const chunk of process.stdin) text += chunk;
+      return text;
+    },
     now: Date.now,
     fetch: globalThis.fetch,
     exec,
