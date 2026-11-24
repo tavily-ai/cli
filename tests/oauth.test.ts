@@ -463,7 +463,7 @@ describe("browser login", () => {
       const { settled } = await start({ timeoutSeconds: 0.1 });
       const out = await settled;
       expect(!out.ok && out.error.message).toBe(
-        "Timed out after 0.1s waiting for browser authorization. Open the login URL printed above, or use: tvly login --api-key tvly-YOUR_KEY",
+        "Timed out after 0.1s waiting for browser authorization. Open the login URL printed above, or use: tvly login --api-key",
       );
     });
 

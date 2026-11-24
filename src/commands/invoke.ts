@@ -56,9 +56,7 @@ function requireKey(command: string): never {
   err(`  ${colors.pink(">")} The ${colors.bold(command)} command requires a Tavily API key.`);
   err();
   err(`  Sign up for a free key at ${safeLink("https://tavily.com")}`);
-  err(
-    `  Then run ${colors.green("tvly login")} or ${colors.green("tvly login --api-key tvly-YOUR_KEY")}`,
-  );
+  err(`  Then run ${colors.green("tvly login")} or ${colors.green("tvly login --api-key")}`);
   err();
   err(
     colors.dim(

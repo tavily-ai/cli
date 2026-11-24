@@ -20,7 +20,7 @@ First-time setup: tvly init
 
 Browser authentication: tvly login
 
-API-key authentication: tvly login --api-key tvly-YOUR_KEY
+API-key authentication: tvly login --api-key
 
 Or set TAVILY_API_KEY environment variable.
 `;
@@ -81,7 +81,10 @@ export function buildProgram(host: Host = realHost()): Command {
     )
     .option("--skip-workflows", "Do not install or update the Tavily official workflows.")
     .option("--skip-install", "Do not install tvly globally.")
-    .option("--api-key <key>", "Authenticate with a Tavily API key instead of OAuth.")
+    .option(
+      "--api-key [key]",
+      "Authenticate with a Tavily API key instead of OAuth. Without a value it asks for the key (hidden) or reads stdin.",
+    )
     .option("--browser", "Open OAuth in a browser.")
     .option("--no-browser", "Print the OAuth URL and wait for its local callback.")
     .action(async (opts: InitOptions, cmd: Command) => {
@@ -91,9 +94,12 @@ export function buildProgram(host: Host = realHost()): Command {
   program
     .command("login")
     .description("Authenticate with Tavily. Stores credentials for future use.")
-    .option("--api-key <key>", "Tavily API key (tvly-...). If omitted, opens browser for OAuth.")
+    .option(
+      "--api-key [key]",
+      "Tavily API key (tvly-...). Without a value it asks for the key (hidden) or reads stdin; without the flag it opens the browser for OAuth.",
+    )
     .option("--no-browser", "Print the login URL instead of opening a browser (SSH / headless).")
-    .action(async (opts: { apiKey?: string; browser?: boolean }, cmd: Command) => {
+    .action(async (opts: { apiKey?: string | boolean; browser?: boolean }, cmd: Command) => {
       await (await authModule()).runLogin(opts, cmd, host);
     });
   program

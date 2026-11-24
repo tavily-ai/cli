@@ -143,6 +143,46 @@ describe("init", () => {
     expect(io.stderr()).toContain("error: Use either --skip-auth or --api-key, not both.");
   });
 
+  test("--api-key with no value reads the key from stdin", async () => {
+    const host = initHost({ env: {}, readStdin: async () => "tvly-piped\n" });
+    expect(await runInit(["--yes", "--skip-skills", "--json", "--api-key"], host)).toBe(0);
+    expect(stdoutJson().verification.auth).toBe(true);
+    expect(await getApiKey(host)).toBe("tvly-piped");
+  });
+
+  test("a bare --api-key followed by another flag still reads stdin", async () => {
+    const host = initHost({ env: {}, readStdin: async () => "tvly-piped\n" });
+    expect(await runInit(["--yes", "--json", "--api-key", "--agent", "codex"], host)).toBe(0);
+    expect(await getApiKey(host)).toBe("tvly-piped");
+    expect(stdoutJson().skills.agents).toEqual(["codex"]);
+  });
+
+  test("--api-key with empty stdin exits 3 at the auth stage", async () => {
+    const host = initHost({ env: {}, readStdin: async () => "" });
+    expect(await runInit(["--yes", "--skip-skills", "--json", "--api-key"], host)).toBe(3);
+    expect(stdoutJson().error.stage).toBe("auth");
+    expect(await getApiKey(host)).toBeNull();
+  });
+
+  test("--json hides the shell-history warning for a literal key", async () => {
+    const host = initHost({ env: {} });
+    expect(await runInit(["--skip-skills", "--json", "--api-key", "tvly-literal"], host)).toBe(0);
+    expect(io.stderr()).not.toContain("shell history");
+    expect(await getApiKey(host)).toBe("tvly-literal");
+  });
+
+  test("a literal key warns about shell history without --json", async () => {
+    const host = initHost({ env: {} });
+    expect(await runInit(["--yes", "--skip-skills", "--api-key", "tvly-literal"], host)).toBe(0);
+    expect(io.stderr()).toContain("shell history");
+  });
+
+  test("--skip-auth with a bare --api-key is a usage error", async () => {
+    const host = initHost({ readStdin: async () => "tvly-piped\n" });
+    expect(await runInit(["--skip-auth", "--api-key"], host)).toBe(2);
+    expect(io.stderr()).toContain("error: Use either --skip-auth or --api-key, not both.");
+  });
+
   test("--skip-skills --skip-auth without a key reports keyless mode", async () => {
     expect(await runInit(["--skip-skills", "--skip-auth", "--json"], initHost({ env: {} }))).toBe(
       0,

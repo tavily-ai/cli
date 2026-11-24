@@ -462,7 +462,7 @@ export async function runBrowserLogin(opts: {
           reject(
             new OAuthError(
               `Timed out after ${timeoutSeconds}s waiting for browser authorization. ` +
-                "Open the login URL printed above, or use: tvly login --api-key tvly-YOUR_KEY",
+                "Open the login URL printed above, or use: tvly login --api-key",
             ),
           ),
         timeoutSeconds * 1000,
