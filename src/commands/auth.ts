@@ -41,7 +41,7 @@ export async function runLogin(
   const json = resolveJson(cmd);
   const configFile = configPaths(host.home).file;
 
-  const apiKey = await resolveApiKeyOption(opts.apiKey, host, !json);
+  const apiKey = await resolveApiKeyOption(opts.apiKey, host, json);
   if (apiKey) {
     await saveApiKey(apiKey, host);
     printLoginSuccess("API key", `Saved to ${configFile}`, json);
@@ -69,7 +69,7 @@ export async function runLogin(
         `    ${colors.dim("Headless / SSH sessions cannot complete browser login unless this machine can receive http://127.0.0.1 callbacks.")}`,
       );
       err(
-        `    ${colors.dim("Use")} ${colors.green("tvly login --api-key tvly-YOUR_KEY")} ${colors.dim("instead.")}`,
+        `    ${colors.dim("Use")} ${colors.green("tvly login --api-key")} ${colors.dim("instead.")}`,
       );
       err();
     }
@@ -138,7 +138,7 @@ function failLogin(message: string, json: boolean): never {
     err(`  ${colors.pink(`> ${sanitizeControl(message)}`)}`);
     err();
     err("  Use an API key instead:");
-    err(`    ${colors.green("tvly login --api-key tvly-YOUR_KEY")}`);
+    err(`    ${colors.green("tvly login --api-key")}`);
     err();
   }
   throw new ExitError(3);

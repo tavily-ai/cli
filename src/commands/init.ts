@@ -340,7 +340,7 @@ async function ensureAuth(
   host: Host,
   hooks: LoginHooks,
 ): Promise<{ authenticated: boolean; method: string }> {
-  const apiKey = await resolveApiKeyOption(opts.apiKey, host, !json);
+  const apiKey = await resolveApiKeyOption(opts.apiKey, host, json);
   if (apiKey) await saveApiKey(apiKey, host);
   const key = await getApiKey(host);
   if (key) return { authenticated: true, method: authMethod(key, host) };

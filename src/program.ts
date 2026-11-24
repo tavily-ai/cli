@@ -20,7 +20,7 @@ First-time setup: tvly init
 
 Browser authentication: tvly login
 
-API-key authentication: tvly login --api-key tvly-YOUR_KEY
+API-key authentication: tvly login --api-key
 
 Or set TAVILY_API_KEY environment variable.
 `;

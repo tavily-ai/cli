@@ -19,52 +19,57 @@ describe("resolveApiKeyOption", () => {
         },
       },
     });
-    expect(await resolveApiKeyOption(true, host, true)).toBe("tvly-typed");
+    expect(await resolveApiKeyOption(true, host, false)).toBe("tvly-typed");
     expect(asked).toEqual(["API key"]);
   });
 
   test("a dash always reads stdin, even on a terminal", async () => {
     const host = fakeHost({ stdinIsTTY: true, readStdin: async () => "tvly-dash\n" });
-    expect(await resolveApiKeyOption("-", host, true)).toBe("tvly-dash");
+    expect(await resolveApiKeyOption("-", host, false)).toBe("tvly-dash");
   });
 
   test("a literal key warns about shell history", async () => {
-    expect(await resolveApiKeyOption("tvly-abc", fakeHost(), true)).toBe("tvly-abc");
+    expect(await resolveApiKeyOption("tvly-abc", fakeHost(), false)).toBe("tvly-abc");
     expect(visible(io.stderr())).toContain("shell history");
   });
 
   test("a key from stdin or a dash does not warn about shell history", async () => {
     const host = fakeHost({ readStdin: async () => "tvly-abc" });
-    await resolveApiKeyOption(true, host, true);
-    await resolveApiKeyOption("-", host, true);
+    await resolveApiKeyOption(true, host, false);
+    await resolveApiKeyOption("-", host, false);
     expect(visible(io.stderr())).not.toContain("shell history");
   });
 
-  test("a literal key is silent when warn is off", async () => {
-    expect(await resolveApiKeyOption("tvly-abc", fakeHost(), false)).toBe("tvly-abc");
+  test("a literal key is silent under --json", async () => {
+    expect(await resolveApiKeyOption("tvly-abc", fakeHost(), true)).toBe("tvly-abc");
     expect(visible(io.stderr())).not.toContain("shell history");
   });
 
   test("reading stdin says so on stderr, so a pipe that never closes is not a silent hang", async () => {
-    await resolveApiKeyOption(true, fakeHost({ readStdin: async () => "tvly-abc" }), true);
+    await resolveApiKeyOption(true, fakeHost({ readStdin: async () => "tvly-abc" }), false);
     expect(visible(io.stderr())).toContain("Reading API key from stdin");
+  });
+
+  test("under --json, reading stdin is announced as a JSON event", async () => {
+    await resolveApiKeyOption(true, fakeHost({ readStdin: async () => "tvly-abc" }), true);
+    expect(JSON.parse(io.stderr())).toEqual({ event: "reading_api_key", source: "stdin" });
   });
 
   test("multi-line stdin yields only the first non-empty line", async () => {
     const host = fakeHost({ readStdin: async () => "tvly-abc\nurl: tavily.com\n" });
-    expect(await resolveApiKeyOption("-", host, true)).toBe("tvly-abc");
+    expect(await resolveApiKeyOption("-", host, false)).toBe("tvly-abc");
     const leading = fakeHost({ readStdin: async () => "\n  tvly-abc  \r\nlogin: me\r\n" });
-    expect(await resolveApiKeyOption(true, leading, true)).toBe("tvly-abc");
+    expect(await resolveApiKeyOption(true, leading, false)).toBe("tvly-abc");
   });
 
   test("an empty answer is an error", async () => {
     await expect(
-      resolveApiKeyOption(true, fakeHost({ readStdin: async () => " \n" }), true),
+      resolveApiKeyOption(true, fakeHost({ readStdin: async () => " \n" }), false),
     ).rejects.toThrow("No API key provided");
   });
 
   test("a literal empty string is an error", async () => {
-    await expect(resolveApiKeyOption("", fakeHost(), true)).rejects.toThrow("No API key provided");
+    await expect(resolveApiKeyOption("", fakeHost(), false)).rejects.toThrow("No API key provided");
   });
 
   test("a cancelled prompt passes its ExitError through unchanged", async () => {
@@ -78,6 +83,6 @@ describe("resolveApiKeyOption", () => {
         },
       },
     });
-    await expect(resolveApiKeyOption(true, host, true)).rejects.toBe(cancelled);
+    await expect(resolveApiKeyOption(true, host, false)).rejects.toBe(cancelled);
   });
 });

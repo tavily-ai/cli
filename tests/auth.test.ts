@@ -249,7 +249,7 @@ describe("login", () => {
     };
     expect(await login({}, false, host({ env: { DISPLAY: ":0" } }), hook)).toBe(3);
     expect(visible(io.stderr())).toContain("> denied");
-    expect(visible(io.stderr())).toContain("tvly login --api-key tvly-YOUR_KEY");
+    expect(visible(io.stderr())).toContain("tvly login --api-key");
   });
 
   test("human success prints the logo and the five get-started lines", async () => {
