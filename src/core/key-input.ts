@@ -5,7 +5,7 @@ import { colors, err } from "../ui/theme.js";
 /**
  * `--api-key <key>` still works, but a key typed on the command line lands in shell history and
  * the process list. `--api-key` with no value asks for it (hidden) on a terminal, or reads it from
- * stdin when piped; `--api-key -` always reads stdin. `warn` prints the history hint for a literal key.
+ * stdin when piped (first non-empty line); `--api-key -` always reads stdin. `warn` prints the history hint for a literal key.
  */
 export async function resolveApiKeyOption(
   value: string | boolean | undefined,
@@ -25,9 +25,16 @@ export async function resolveApiKeyOption(
   } else if (value === true && host.stdinIsTTY) {
     key = await host.prompt.password("API key");
   } else {
+    // Some runners hand over a pipe that never closes, so say what we are waiting for.
+    err(`  ${colors.dim("Reading API key from stdin...")}`);
     key = await host.readStdin();
   }
-  key = key.trim();
+  // A piped secret may carry extra lines (`pass` entries do); the key is the first non-empty one.
+  key =
+    key
+      .split(/\r?\n/)
+      .find((line) => line.trim() !== "")
+      ?.trim() ?? "";
   if (!key)
     throw new Error(
       "No API key provided. Paste it when asked, or pipe it in: echo $KEY | tvly login --api-key -",

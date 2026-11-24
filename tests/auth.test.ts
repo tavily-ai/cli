@@ -204,9 +204,34 @@ describe("login", () => {
     expect(visible(io.stderr())).toContain("shell history");
   });
 
-  test("--json does not print the history warning", async () => {
-    expect(await runProgram(["--json", "login", "--api-key", "tvly-literal"], host())).toBe(0);
+  test("--json does not print the history warning and still saves the key", async () => {
+    const h = host();
+    expect(await runProgram(["--json", "login", "--api-key", "tvly-literal"], h)).toBe(0);
     expect(visible(io.stderr())).not.toContain("shell history");
+    expect(readConfig(h)).toEqual({ api_key: "tvly-literal" });
+    expect(stdoutJson()).toEqual({
+      authenticated: true,
+      method: "api_key",
+      detail: `Saved to ${configPaths(home).file}`,
+    });
+  });
+
+  test("a flag after a bare --api-key is not taken as the key", async () => {
+    const h = host({ readStdin: async () => "tvly-piped\n" });
+    expect(await runProgram(["login", "--api-key", "--no-browser"], h)).toBe(0);
+    expect(readConfig(h)).toEqual({ api_key: "tvly-piped" });
+  });
+
+  test("--api-key with empty stdin fails and leaves the config untouched", async () => {
+    const h = host({ readStdin: async () => "" });
+    await expect(runProgram(["login", "--api-key"], h)).rejects.toThrow("No API key provided");
+    expect(readConfig(h)).toEqual({});
+  });
+
+  test("a multi-line stdin saves only the first line as the key", async () => {
+    const h = host({ readStdin: async () => "tvly-piped\nurl: tavily.com\n" });
+    expect(await runProgram(["login", "--api-key", "-"], h)).toBe(0);
+    expect(readConfig(h)).toEqual({ api_key: "tvly-piped" });
   });
 
   test("oauth --json reports replacement revocation failure", async () => {
